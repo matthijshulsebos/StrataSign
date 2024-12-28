@@ -29,7 +29,7 @@ sink()
 # Extract genes from all related pathways
 genes <- unlist(lapply(related_pathways, get_genes_from_pathway))
 
-source("src/utils.R")
+source("src/utils/format_utils.R")
 mapped_metabolic_genes <- map_entrez_to_symbols(genes)
 
 # Step 6: Output the result
