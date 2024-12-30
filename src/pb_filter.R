@@ -8,7 +8,7 @@ if (!exists("lung_ldm")) {
   load("data/lung_ldm.rd")
 }
 
-pseudo_bulk <- read.csv("src_output/pseudo_bulk.csv",r=1,h=1,stringsAsFactors = F, check.names = FALSE)
+pseudo_bulk <- read.csv("src_output/pb_sample.csv",r=1,h=1,stringsAsFactors = F, check.names = FALSE)
 sample_annots <- read.csv("input_tables/table_s1_sample_table.csv",r=1,h=1,stringsAsFactors = F)
 imm_genes <- read.csv("src_output/hsa01100_genes.csv",r=1,h=1,stringsAsFactors = F)
 
@@ -21,7 +21,7 @@ pseudo_bulk_filtered <- pseudo_bulk[intersect(unlist(imm_genes), rownames(pseudo
 # Write to file
 write.csv(
   pseudo_bulk_filtered,
-  file = "src_output/pb_patient_filtered.csv"
+  file = "src_output/pb_sample_filtered.csv"
 )
 
 # Clear memory

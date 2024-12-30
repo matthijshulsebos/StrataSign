@@ -3,7 +3,7 @@
 library(Matrix)
 
 # Load the datasets. Use pseudo_bulk.csv if you do not want filtered genes and samples
-pb_sample_filtered <- read.csv("src_output/pseudo_bulk_filtered.csv",r=1,h=1,stringsAsFactors = F, check.names = FALSE)
+pb_sample_filtered <- read.csv("src_output/pb_sample_filtered.csv",r=1,h=1,stringsAsFactors = F, check.names = FALSE)
 sample_annots <- read.csv("input_tables/table_s1_sample_table.csv",r=1,h=1,stringsAsFactors = F)
 
 # Create a group factor linking sample ID and patient ID
