@@ -1,0 +1,61 @@
+cluster,cell_type,sub_lineage,n_metabolic_genes,n_significant_metabolic_genes,n_kegg_pathways
+cluster_1,T,T_GZMK,1609,2,0
+cluster_2,MNP,CD14 mono,1609,84,4
+cluster_3,epi_endo_fibro_doublet,NA,1609,56,0
+cluster_4,epi_endo_fibro_doublet,NA,1609,75,3
+cluster_5,MNP,MoMac-IV,1609,0,0
+cluster_6,epi_endo_fibro_doublet,NA,1609,34,10
+cluster_7,mast,mast,1609,0,0
+cluster_8,MNP,IM,1609,20,0
+cluster_9,B&plasma,IgG,1609,128,16
+cluster_10,MNP,AM,1609,9,0
+cluster_11,MNP,MoMac-II,1609,138,15
+cluster_12,epi_endo_fibro_doublet,NA,1609,24,0
+cluster_13,NK,NK,1609,58,14
+cluster_14,MNP,cDC2,1609,73,0
+cluster_15,epi_endo_fibro_doublet,NA,1609,10,1
+cluster_16,MNP,AZU1_mac,1609,0,0
+cluster_17,B&plasma,IgG,1609,108,16
+cluster_18,T,Tcycle,1609,45,0
+cluster_19,T,Treg,1609,141,17
+cluster_20,T,T_Nklike,1609,53,13
+cluster_21,epi_endo_fibro_doublet,NA,1609,320,14
+cluster_22,epi_endo_fibro_doublet,NA,1609,49,0
+cluster_23,MNP,CD16 mono,1609,122,14
+cluster_24,epi_endo_fibro_doublet,NA,1609,2,0
+cluster_25,MNP,AM,1609,69,1
+cluster_26,epi_endo_fibro_doublet,NA,1609,4,0
+cluster_27,epi_endo_fibro_doublet,NA,1609,152,16
+cluster_28,B&plasma,IgG,1609,86,19
+cluster_29,MNP,DC3,1609,71,12
+cluster_30,MNP,DC3,1609,83,18
+cluster_31,B&plasma,IgA,1609,299,15
+cluster_32,MNP,MoMac-III,1609,59,18
+cluster_33,MNP,MoMac-III,1609,82,17
+cluster_34,T,Tcm/naive_II,1609,24,0
+cluster_35,MNP,MoMac-I,1609,74,1
+cluster_36,MNP,CD14 mono,1609,8,12
+cluster_37,pDC,pDC,1609,2,0
+cluster_38,MNP,MoMac-III,1609,6,5
+cluster_39,T,Tcm/naive_I,1609,21,0
+cluster_40,B&plasma,IgM,1609,37,17
+cluster_41,MNP,mregDC,1609,0,0
+cluster_42,MNP,MoMac-II,1609,315,18
+cluster_43,B&plasma,IgD,1609,0,0
+cluster_44,T,T_activated,1609,159,14
+cluster_45,MNP,cDC1,1609,1,7
+cluster_46,B&plasma,IgG,1609,99,15
+cluster_47,MNP,MoMac-IV,1609,45,13
+cluster_48,T,CD8 Trm,1609,18,0
+cluster_49,MNP,CD14 mono,1609,5,0
+cluster_50,T,CD4 Trm,1609,6,2
+cluster_51,T,Tcm/naive_I,1609,25,0
+cluster_52,MNP,DC3,1609,226,19
+cluster_53,T,Tcm/naive_II,1609,18,0
+cluster_54,MNP,AM,1609,28,0
+cluster_55,MNP,AM,1609,225,18
+cluster_56,B&plasma,B,1609,319,13
+cluster_57,MNP,AM,1609,222,21
+cluster_58,MNP,CD14 mono,1609,42,14
+cluster_59,T,CD4 Trm,1609,24,0
+cluster_60,epi_endo_fibro_doublet,NA,1609,5,0

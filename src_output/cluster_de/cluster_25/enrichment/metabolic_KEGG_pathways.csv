@@ -1,0 +1,2 @@
+category,subcategory,ID,Description,GeneRatio,BgRatio,RichFactor,FoldEnrichment,zScore,pvalue,p.adjust,qvalue,geneID,Count
+Metabolism,Global and overview maps,hsa01212,Fatty acid metabolism,9/69,57/1700,0.15789473684210525,3.890160183066362,4.563886275563587,3.335117975347313e-4,0.033351179753473126,0.033351179753473126,23305/9415/79993/1962/2194/37/3992/3032/401494,9

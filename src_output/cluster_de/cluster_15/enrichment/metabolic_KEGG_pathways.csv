@@ -1,0 +1,2 @@
+category,subcategory,ID,Description,GeneRatio,BgRatio,RichFactor,FoldEnrichment,zScore,pvalue,p.adjust,qvalue,geneID,Count
+Metabolism,Lipid metabolism,hsa00590,Arachidonic acid metabolism,4/10,63/1700,0.06349206349206349,10.793650793650794,6.091775455245384,3.0461931177030305e-4,0.013098630406123031,0.012505424377938756,5730/5740/5743/4056,4
