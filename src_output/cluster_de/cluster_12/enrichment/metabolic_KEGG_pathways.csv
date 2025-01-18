@@ -1,1 +1,2 @@
 category,subcategory,ID,Description,GeneRatio,BgRatio,RichFactor,FoldEnrichment,zScore,pvalue,p.adjust,qvalue,geneID,Count
+Metabolism,Amino acid metabolism,hsa00380,Tryptophan metabolism,5/26,42/1700,0.11904761904761904,7.783882783882784,5.546465985863852,3.2358701446061377e-4,0.022651091012242965,0.020777692507470993,11185/4129/217/847/38,5

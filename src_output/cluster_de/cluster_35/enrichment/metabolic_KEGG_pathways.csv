@@ -1,2 +1,1 @@
 category,subcategory,ID,Description,GeneRatio,BgRatio,RichFactor,FoldEnrichment,zScore,pvalue,p.adjust,qvalue,geneID,Count
-Metabolism,Carbohydrate metabolism,hsa00010,Glycolysis / Gluconeogenesis,10/74,67/1700,0.14925373134328357,3.4288019362646227,4.3260216451640625,4.4184062791536677e-4,0.04948615032652108,0.047439730576176224,217/5214/3099/2597/130589/7167/3939/2821/5223/5315,10
