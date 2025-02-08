@@ -6,38 +6,37 @@ library(pROC)
 library(iml)
 library(data.table)
 library(tibble)
-library(pROC)  # Add this line to load the pROC package
 library(ggplot2)
 
 # Define datasets
 datasets <- list(
   all_clusters = list(
-    X_train = "src/modeling/ablation_study/X_train_all_clusters.csv",
-    X_test = "src/modeling/ablation_study/X_test_all_clusters.csv",
-    y_train = "src/modeling/ablation_study/y_train_all_clusters.csv",
-    y_test = "src/modeling/ablation_study/y_test_all_clusters.csv",
-    results = "src/modeling/ablation_study/results_all_clusters.csv"
+    X_train = "src/modeling/ablation_study/datasets/X_train_all_clusters.csv",
+    X_test = "src/modeling/ablation_study/datasets/X_test_all_clusters.csv",
+    y_train = "src/modeling/ablation_study/datasets/y_train_all_clusters.csv",
+    y_test = "src/modeling/ablation_study/datasets/y_test_all_clusters.csv",
+    results = "src/modeling/ablation_study/model_output/results_all_clusters.csv"
   ),
   lcam_hi = list(
-    X_train = "src/modeling/ablation_study/X_train_lcam_hi.csv",
-    X_test = "src/modeling/ablation_study/X_test_lcam_hi.csv",
-    y_train = "src/modeling/ablation_study/y_train_lcam_hi.csv",
-    y_test = "src/modeling/ablation_study/y_test_lcam_hi.csv",
-    results = "src/modeling/ablation_study/results_lcam_hi.csv"
+    X_train = "src/modeling/ablation_study/datasets/X_train_lcam_hi.csv",
+    X_test = "src/modeling/ablation_study/datasets/X_test_lcam_hi.csv",
+    y_train = "src/modeling/ablation_study/datasets/y_train_lcam_hi.csv",
+    y_test = "src/modeling/ablation_study/datasets/y_test_lcam_hi.csv",
+    results = "src/modeling/ablation_study/model_output/results_lcam_hi.csv"
   ),
   lcam_lo = list(
-    X_train = "src/modeling/ablation_study/X_train_lcam_lo.csv",
-    X_test = "src/modeling/ablation_study/X_test_lcam_lo.csv",
-    y_train = "src/modeling/ablation_study/y_train_lcam_lo.csv",
-    y_test = "src/modeling/ablation_study/y_test_lcam_lo.csv",
-    results = "src/modeling/ablation_study/results_lcam_lo.csv"
+    X_train = "src/modeling/ablation_study/datasets/X_train_lcam_lo.csv",
+    X_test = "src/modeling/ablation_study/datasets/X_test_lcam_lo.csv",
+    y_train = "src/modeling/ablation_study/datasets/y_train_lcam_lo.csv",
+    y_test = "src/modeling/ablation_study/datasets/y_test_lcam_lo.csv",
+    results = "src/modeling/ablation_study/model_output/results_lcam_lo.csv"
   ),
   lcam_both = list(
-    X_train = "src/modeling/ablation_study/X_train_lcam_both.csv",
-    X_test = "src/modeling/ablation_study/X_test_lcam_both.csv",
-    y_train = "src/modeling/ablation_study/y_train_lcam_both.csv",
-    y_test = "src/modeling/ablation_study/y_test_lcam_both.csv",
-    results = "src/modeling/ablation_study/results_lcam_both.csv"
+    X_train = "src/modeling/ablation_study/datasets/X_train_lcam_both.csv",
+    X_test = "src/modeling/ablation_study/datasets/X_test_lcam_both.csv",
+    y_train = "src/modeling/ablation_study/datasets/y_train_lcam_both.csv",
+    y_test = "src/modeling/ablation_study/datasets/y_test_lcam_both.csv",
+    results = "src/modeling/ablation_study/model_output/results_lcam_both.csv"
   )
 )
 
@@ -73,14 +72,21 @@ for (dataset_name in names(datasets)) {
   # Remove constant/zero-variance columns
   print("Removing constant/zero-variance columns...")
   nzv <- nearZeroVar(X_train, saveMetrics = TRUE)
-  X_train <- X_train[, !nzv$nzv, with = FALSE]
-  X_test <- X_test[, !nzv$nzv, with = FALSE]
+  X_train <- X_train[, !nzv$zeroVar, with = FALSE]
+  X_test <- X_test[, !nzv$zeroVar, with = FALSE]
   
   # Apply PCA for dimensionality reduction
   print("Applying PCA for dimensionality reduction...")
   pca_model <- prcomp(as.matrix(X_train), center = TRUE, scale. = TRUE)
-  X_train_pca <- predict(pca_model, as.matrix(X_train))
-  X_test_pca <- predict(pca_model, as.matrix(X_test))
+  
+  # Determine the number of components to retain (90% variance)
+  explained_variance <- cumsum(pca_model$sdev^2) / sum(pca_model$sdev^2)
+  num_components <- which(explained_variance >= 0.90)[1]
+  print(paste("Number of components to retain:", num_components))
+  
+  # Transform the data using the selected components
+  X_train_pca <- predict(pca_model, as.matrix(X_train))[, 1:num_components]
+  X_test_pca <- predict(pca_model, as.matrix(X_test))[, 1:num_components]
   
   # Train SVM model with linear kernel
   print("Training SVM model with linear kernel...")
@@ -112,7 +118,7 @@ for (dataset_name in names(datasets)) {
     geom_text(aes(label = Freq)) +
     scale_fill_gradient(low = "white", high = "red") +
     ggtitle(paste("Confusion Matrix for Linear Kernel -", dataset_name))
-  ggsave(paste0("src/modeling/ablation_study/confusion_matrix_linear_", dataset_name, ".png"), plot = p)
+  ggsave(paste0("src/modeling/ablation_study/model_output/confusion_matrix_linear_", dataset_name, ".png"), plot = p)
 
   # Generate SHAP values for linear kernel
   print("Generating SHAP values for linear kernel...")
@@ -120,7 +126,7 @@ for (dataset_name in names(datasets)) {
   shapley_linear <- Shapley$new(predictor_linear, x.interest = as.data.frame(X_test_pca[1, , drop = FALSE]))
   shapley_plot_linear <- shapley_linear$plot() +
     ggtitle(paste("SHAP Values for Linear Kernel -", dataset_name))
-  ggsave(paste0("src/modeling/ablation_study/shap_linear_", dataset_name, ".png"), plot = shapley_plot_linear)
+  ggsave(paste0("src/modeling/ablation_study/model_output/shap_linear_", dataset_name, ".png"), plot = shapley_plot_linear)
   
   # Train SVM model with RBF kernel
   print("Training SVM model with RBF kernel...")
@@ -152,7 +158,7 @@ for (dataset_name in names(datasets)) {
     geom_text(aes(label = Freq)) +
     scale_fill_gradient(low = "white", high = "red") +
     ggtitle(paste("Confusion Matrix for RBF Kernel -", dataset_name))
-  ggsave(paste0("src/modeling/ablation_study/confusion_matrix_rbf_", dataset_name, ".png"), plot = p)
+  ggsave(paste0("src/modeling/ablation_study/model_output/confusion_matrix_rbf_", dataset_name, ".png"), plot = p)
 
   # Generate SHAP values for RBF kernel
   print("Generating SHAP values for RBF kernel...")
@@ -160,10 +166,10 @@ for (dataset_name in names(datasets)) {
   shapley_rbf <- Shapley$new(predictor_rbf, x.interest = as.data.frame(X_test_pca[1, , drop = FALSE]))
   shapley_plot_rbf <- shapley_rbf$plot() +
     ggtitle(paste("SHAP Values for RBF Kernel -", dataset_name))
-  ggsave(paste0("src/modeling/ablation_study/shap_rbf_", dataset_name, ".png"), plot = shapley_plot_rbf)
+  ggsave(paste0("src/modeling/ablation_study/model_output/shap_rbf_", dataset_name, ".png"), plot = shapley_plot_rbf)
 }
 
 # Save performance summary
-write_csv(performance_summary, "src/modeling/ablation_study/model_performance_summary.csv")
+write_csv(performance_summary, "src/modeling/ablation_study/model_output/model_performance_summary.csv")
 
 print("Script completed successfully.")

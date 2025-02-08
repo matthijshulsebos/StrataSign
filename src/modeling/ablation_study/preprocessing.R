@@ -51,10 +51,6 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   counts_long <- counts_long %>%
     mutate(gene_cluster = paste(gene, cluster, sep = "_"))
 
-  # Combine gene and cluster into a single identifier
-  counts_long <- counts_long %>%
-    mutate(gene_cluster = paste(gene, cluster, sep = "_"))
-
   # Pivot so each gene-cluster combo becomes its own column
   counts_wide <- counts_long %>%
     select(sample_ID, gene_cluster, count) %>%
@@ -72,7 +68,7 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   # Split train/test by patient_ID
   set.seed(42)
   patients <- unique(counts_wide$patient_ID)
-  train_patients <- sample(patients, size = round(length(patients) * 0.8))
+  train_patients <- sample(patients, size = round(length(patients) * 0.7))
   train <- counts_wide %>% filter(patient_ID %in% train_patients)
   test <- counts_wide %>% filter(!patient_ID %in% train_patients)
   
@@ -89,10 +85,10 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   }
 
   # Save outputs
-  write_csv(train %>% select(-patient_ID, -sample_ID, -tissue), paste0("src/modeling/ablation_study/X_train_", subset_name, ".csv"))
-  write_csv(test %>% select(-patient_ID, -sample_ID, -tissue), paste0("src/modeling/ablation_study/X_test_", subset_name, ".csv"))
-  write_csv(data.frame(x = train$tissue), paste0("src/modeling/ablation_study/y_train_", subset_name, ".csv"))
-  write_csv(data.frame(x = test$tissue), paste0("src/modeling/ablation_study/y_test_", subset_name, ".csv"))
+  write_csv(train %>% select(-patient_ID, -sample_ID, -tissue), paste0("src/modeling/ablation_study/datasets/X_train_", subset_name, ".csv"))
+  write_csv(test %>% select(-patient_ID, -sample_ID, -tissue), paste0("src/modeling/ablation_study/datasets/X_test_", subset_name, ".csv"))
+  write_csv(data.frame(x = train$tissue), paste0("src/modeling/ablation_study/datasets/y_train_", subset_name, ".csv"))
+  write_csv(data.frame(x = test$tissue), paste0("src/modeling/ablation_study/datasets/y_test_", subset_name, ".csv"))
 }
 
 # Process all cluster subsets
