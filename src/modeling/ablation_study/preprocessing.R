@@ -72,7 +72,7 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   counts_wide <- counts_wide %>% inner_join(table_s1, by = "sample_ID")
 
   # Remove metadata columns before splitting, but keep 'tissue' as the target variable
-  counts_wide <- counts_wide %>% select(-c(amp_batch_ID, old_lib_name, HTO, disease, `Use.in.Clustering.Model.`, library_chemistry, prime, vdj_kit, prep, metadata_indicator, biopsy_site))
+  counts_wide <- counts_wide %>% select(-c(sample_ID, amp_batch_ID, old_lib_name, HTO, disease, `Use.in.Clustering.Model.`, library_chemistry, prime, vdj_kit, prep, metadata_indicator, biopsy_site))
 
   # Split train/test by patient_ID
   set.seed(42)

@@ -31,7 +31,7 @@ plot_shap_values <- function(shapley_path, title, output_path) {
   ggsave(output_path, plot = shapley_plot)
 }
 
-plot_top_genes_per_cluster <- function(original_feature_contributions_path, dataset_name, n = 10) {
+plot_top_genes_per_cluster <- function(original_feature_contributions_path, dataset_name, kernel_type, n = 10) {
   print(paste("Reading original feature contributions from:", original_feature_contributions_path))
   original_feature_contributions <- fread(original_feature_contributions_path)
   print("Finished reading original feature contributions.")
@@ -71,16 +71,16 @@ plot_top_genes_per_cluster <- function(original_feature_contributions_path, data
       geom_bar(stat = "identity") +
       coord_flip() +
       scale_fill_manual(values = c("red", "blue"), labels = c("Negative", "Positive")) +
-      ggtitle(paste("Top Genes for Cluster", cluster, "-", dataset_name)) +
+      ggtitle(paste("Top Genes for Cluster", cluster, "-", dataset_name, "-", kernel_type)) +
       labs(fill = "Contribution")
     
-    output_path <- paste0("src/modeling/ablation_study/plotting_output/top_genes/", dataset_name, "_cluster_", cluster, ".png")
+    output_path <- paste0("src/modeling/ablation_study/plotting_output/top_genes/", dataset_name, "_", kernel_type, "_cluster_", cluster, ".png")
     print(paste("Saving top genes plot to:", output_path))
     ggsave(output_path, plot = p)
   }
 }
 
-plot_overview_top_genes <- function(original_feature_contributions_path, dataset_name, n = 10) {
+plot_overview_top_genes <- function(original_feature_contributions_path, dataset_name, kernel_type, n = 10) {
   print(paste("Reading original feature contributions from:", original_feature_contributions_path))
   original_feature_contributions <- fread(original_feature_contributions_path)
   print("Finished reading original feature contributions.")
@@ -108,10 +108,10 @@ plot_overview_top_genes <- function(original_feature_contributions_path, dataset
     geom_bar(stat = "identity") +
     coord_flip() +
     scale_fill_manual(values = c("red", "blue"), labels = c("Negative", "Positive")) +
-    ggtitle(paste("Top Contributing Genes Across All Clusters -", dataset_name)) +
+    ggtitle(paste("Top Contributing Genes Across All Clusters -", dataset_name, "-", kernel_type)) +
     labs(fill = "Contribution")
   
-  output_path <- paste0("src/modeling/ablation_study/plotting_output/top_genes_overview_", dataset_name, ".png")
+  output_path <- paste0("src/modeling/ablation_study/plotting_output/top_genes_overview_", dataset_name, "_", kernel_type, ".png")
   print(paste("Saving top genes overview plot to:", output_path))
   ggsave(output_path, plot = p)
 }
@@ -186,6 +186,7 @@ for (dataset_name in datasets) {
   plot_top_genes_per_cluster(
     paste0("src/modeling/ablation_study/model_output/original_feature_contributions_linear_", dataset_name, ".csv"),
     dataset_name,
+    "linear",
     n = 10
   )
   
@@ -193,6 +194,7 @@ for (dataset_name in datasets) {
   plot_top_genes_per_cluster(
     paste0("src/modeling/ablation_study/model_output/original_feature_contributions_rbf_", dataset_name, ".csv"),
     dataset_name,
+    "rbf",
     n = 10
   )
   
@@ -201,6 +203,7 @@ for (dataset_name in datasets) {
   plot_overview_top_genes(
     paste0("src/modeling/ablation_study/model_output/original_feature_contributions_linear_", dataset_name, ".csv"),
     dataset_name,
+    "linear",
     n = 10
   )
   
@@ -208,6 +211,7 @@ for (dataset_name in datasets) {
   plot_overview_top_genes(
     paste0("src/modeling/ablation_study/model_output/original_feature_contributions_rbf_", dataset_name, ".csv"),
     dataset_name,
+    "rbf",
     n = 10
   )
 }
