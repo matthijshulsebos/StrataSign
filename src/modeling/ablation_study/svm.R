@@ -128,6 +128,17 @@ for (dataset_name in names(datasets)) {
     ggtitle(paste("SHAP Values for Linear Kernel -", dataset_name))
   ggsave(paste0("src/modeling/ablation_study/model_output/shap_linear_", dataset_name, ".png"), plot = shapley_plot_linear)
   
+  # Map SHAP values back to original features
+  print("Mapping SHAP values back to original features...")
+  shap_values_linear <- as.data.frame(shapley_linear$results$phi)
+  shap_values_linear <- shap_values_linear[1:num_components, , drop = FALSE]
+  pca_loadings <- as.matrix(pca_model$rotation[, 1:num_components])
+  original_feature_contributions <- as.data.frame(t(pca_loadings %*% as.matrix(shap_values_linear)))
+  colnames(original_feature_contributions) <- colnames(X_train)
+  
+  # Save original feature contributions
+  write_csv(original_feature_contributions, paste0("src/modeling/ablation_study/model_output/original_feature_contributions_linear_", dataset_name, ".csv"))
+
   # Train SVM model with RBF kernel
   print("Training SVM model with RBF kernel...")
   svm_model_rbf <- svm(X_train_pca, y_train$x, kernel = "radial", probability = TRUE)
@@ -167,6 +178,16 @@ for (dataset_name in names(datasets)) {
   shapley_plot_rbf <- shapley_rbf$plot() +
     ggtitle(paste("SHAP Values for RBF Kernel -", dataset_name))
   ggsave(paste0("src/modeling/ablation_study/model_output/shap_rbf_", dataset_name, ".png"), plot = shapley_plot_rbf)
+  
+  # Map SHAP values back to original features
+  print("Mapping SHAP values back to original features...")
+  shap_values_rbf <- as.data.frame(shapley_rbf$results$phi)
+  shap_values_rbf <- shap_values_rbf[1:num_components, , drop = FALSE]
+  original_feature_contributions_rbf <- as.data.frame(t(pca_loadings %*% as.matrix(shap_values_rbf)))
+  colnames(original_feature_contributions_rbf) <- colnames(X_train)
+  
+  # Save original feature contributions
+  write_csv(original_feature_contributions_rbf, paste0("src/modeling/ablation_study/model_output/original_feature_contributions_rbf_", dataset_name, ".csv"))
 }
 
 # Save performance summary
