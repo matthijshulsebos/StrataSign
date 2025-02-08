@@ -47,14 +47,23 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   counts_long <- as.data.frame(as.table(counts))
   colnames(counts_long) <- c("sample_ID", "gene", "cluster", "count")
 
-  # Combine gene and cluster into a single identifier
+  # Convert cluster column from factor to numeric
+  counts_long$cluster <- as.numeric(as.character(counts_long$cluster))
+
+  # Convert cluster numbers to sublineage or lineage names
   counts_long <- counts_long %>%
-    mutate(gene_cluster = paste(gene, cluster, sep = "_"))
+    left_join(annots_list, by = c("cluster" = "cluster")) %>%
+    mutate(cluster_name = ifelse(!is.na(sub_lineage), sub_lineage, lineage)) %>%
+    mutate(cluster_name = gsub("/", "-", cluster_name)) %>%  # Sanitize cluster names
+    mutate(gene_cluster = paste(gene, cluster_name, cluster, sep = "|"))
+
+  # Ensure count column is numeric
+  counts_long$count <- as.numeric(counts_long$count)
 
   # Pivot so each gene-cluster combo becomes its own column
   counts_wide <- counts_long %>%
     select(sample_ID, gene_cluster, count) %>%
-    pivot_wider(names_from = gene_cluster, values_from = count, values_fill = 0)
+    pivot_wider(names_from = gene_cluster, values_from = count, values_fill = list(count = 0))
 
   # Convert 'sample_ID' column to character
   counts_wide <- counts_wide %>% mutate(sample_ID = as.character(sample_ID))
@@ -62,8 +71,8 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   # Merge with metadata
   counts_wide <- counts_wide %>% inner_join(table_s1, by = "sample_ID")
 
-  # Remove metadata columns before splitting
-  counts_wide <- counts_wide %>% select(-c(old_lib_name, HTO, disease, `Use.in.Clustering.Model.`, library_chemistry, prime, vdj_kit, prep, metadata_indicator, biopsy_site))
+  # Remove metadata columns before splitting, but keep 'tissue' as the target variable
+  counts_wide <- counts_wide %>% select(-c(amp_batch_ID, old_lib_name, HTO, disease, `Use.in.Clustering.Model.`, library_chemistry, prime, vdj_kit, prep, metadata_indicator, biopsy_site))
 
   # Split train/test by patient_ID
   set.seed(42)
@@ -71,6 +80,12 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   train_patients <- sample(patients, size = round(length(patients) * 0.7))
   train <- counts_wide %>% filter(patient_ID %in% train_patients)
   test <- counts_wide %>% filter(!patient_ID %in% train_patients)
+  
+  # Extract and remove the target variable 'tissue'
+  y_train <- train$tissue
+  y_test <- test$tissue
+  train <- train %>% select(-tissue, -patient_ID)
+  test <- test %>% select(-tissue, -patient_ID)
   
   # Check for NA values in train and test dataframes
   if (anyNA(train)) {
@@ -85,10 +100,10 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   }
 
   # Save outputs
-  write_csv(train %>% select(-patient_ID, -sample_ID, -tissue), paste0("src/modeling/ablation_study/datasets/X_train_", subset_name, ".csv"))
-  write_csv(test %>% select(-patient_ID, -sample_ID, -tissue), paste0("src/modeling/ablation_study/datasets/X_test_", subset_name, ".csv"))
-  write_csv(data.frame(x = train$tissue), paste0("src/modeling/ablation_study/datasets/y_train_", subset_name, ".csv"))
-  write_csv(data.frame(x = test$tissue), paste0("src/modeling/ablation_study/datasets/y_test_", subset_name, ".csv"))
+  write_csv(train, paste0("src/modeling/ablation_study/datasets/X_train_", subset_name, ".csv"))
+  write_csv(test, paste0("src/modeling/ablation_study/datasets/X_test_", subset_name, ".csv"))
+  write_csv(data.frame(x = y_train), paste0("src/modeling/ablation_study/datasets/y_train_", subset_name, ".csv"))
+  write_csv(data.frame(x = y_test), paste0("src/modeling/ablation_study/datasets/y_test_", subset_name, ".csv"))
 }
 
 # Process all cluster subsets

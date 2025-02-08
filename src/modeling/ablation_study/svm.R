@@ -50,39 +50,38 @@ performance_summary <- tibble(
   ROC_AUC = numeric()
 )
 
-# Iterate over datasets
+# Ensure the output directory exists
+output_dir <- "src/modeling/ablation_study/model_output"
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
+
 for (dataset_name in names(datasets)) {
   print(paste("Processing dataset:", dataset_name))
   
   # Load datasets
-  print("Loading X_train and X_test...")
   X_train <- fread(datasets[[dataset_name]]$X_train)
   X_test <- fread(datasets[[dataset_name]]$X_test)
   
   # Load y_train and y_test
-  print("Loading y_train and y_test...")
   y_train <- fread(datasets[[dataset_name]]$y_train)
   y_test <- fread(datasets[[dataset_name]]$y_test)
 
   # Ensure Proper Label Encoding
-  print("Encoding labels...")
   y_train$x <- factor(y_train$x, levels = c("Normal", "Tumor"), labels = c(0, 1))
   y_test$x <- factor(y_test$x, levels = c("Normal", "Tumor"), labels = c(0, 1))
   
   # Remove constant/zero-variance columns
-  print("Removing constant/zero-variance columns...")
   nzv <- nearZeroVar(X_train, saveMetrics = TRUE)
   X_train <- X_train[, !nzv$zeroVar, with = FALSE]
   X_test <- X_test[, !nzv$zeroVar, with = FALSE]
   
   # Apply PCA for dimensionality reduction
-  print("Applying PCA for dimensionality reduction...")
   pca_model <- prcomp(as.matrix(X_train), center = TRUE, scale. = TRUE)
   
   # Determine the number of components to retain (90% variance)
   explained_variance <- cumsum(pca_model$sdev^2) / sum(pca_model$sdev^2)
   num_components <- which(explained_variance >= 0.90)[1]
-  print(paste("Number of components to retain:", num_components))
   
   # Transform the data using the selected components
   X_train_pca <- predict(pca_model, as.matrix(X_train))[, 1:num_components]
@@ -93,12 +92,13 @@ for (dataset_name in names(datasets)) {
   svm_model_linear <- svm(X_train_pca, y_train$x, kernel = "linear", probability = TRUE)
 
   # Predict on test set with linear kernel
-  print("Predicting on test set with linear kernel...")
   y_pred_linear <- predict(svm_model_linear, X_test_pca, probability = TRUE)
   y_prob_linear <- attr(y_pred_linear, "probabilities")[,2]
 
+  # Save predictions and true labels for linear kernel
+  write_csv(data.frame(y_test = y_test$x, y_pred = y_pred_linear), paste0(output_dir, "/predictions_linear_", dataset_name, ".csv"))
+
   # Calculate performance metrics for linear kernel
-  print("Calculating performance metrics for linear kernel...")
   confusion_linear <- confusionMatrix(y_pred_linear, y_test$x)
   accuracy_linear <- confusion_linear$overall["Accuracy"]
   precision_linear <- confusion_linear$byClass["Pos Pred Value"]
@@ -110,46 +110,35 @@ for (dataset_name in names(datasets)) {
   performance_summary <- performance_summary %>%
     add_row(Dataset = paste(dataset_name, "Linear", sep = "_"), Accuracy = accuracy_linear, Precision = precision_linear, Recall = recall_linear, F1_score = f1_score_linear, ROC_AUC = roc_auc_linear)
   
-  # Generate confusion matrix plot for linear kernel
-  print("Generating confusion matrix plot for linear kernel...")
-  confusion_matrix_plot_linear <- as.data.frame(confusion_linear$table)
-  p <- ggplot(confusion_matrix_plot_linear, aes(Prediction, Reference, fill = Freq)) +
-    geom_tile() +
-    geom_text(aes(label = Freq)) +
-    scale_fill_gradient(low = "white", high = "red") +
-    ggtitle(paste("Confusion Matrix for Linear Kernel -", dataset_name))
-  ggsave(paste0("src/modeling/ablation_study/model_output/confusion_matrix_linear_", dataset_name, ".png"), plot = p)
-
   # Generate SHAP values for linear kernel
-  print("Generating SHAP values for linear kernel...")
   predictor_linear <- Predictor$new(svm_model_linear, data = as.data.frame(X_train_pca), y = y_train$x)
   shapley_linear <- Shapley$new(predictor_linear, x.interest = as.data.frame(X_test_pca[1, , drop = FALSE]))
-  shapley_plot_linear <- shapley_linear$plot() +
-    ggtitle(paste("SHAP Values for Linear Kernel -", dataset_name))
-  ggsave(paste0("src/modeling/ablation_study/model_output/shap_linear_", dataset_name, ".png"), plot = shapley_plot_linear)
   
-  # Map SHAP values back to original features
-  print("Mapping SHAP values back to original features...")
+  # Save SHAP values for principal components
   shap_values_linear <- as.data.frame(shapley_linear$results$phi)
-  shap_values_linear <- shap_values_linear[1:num_components, , drop = FALSE]
+  shap_values_linear <- shap_values_linear[1:num_components, , drop = FALSE]  # Filter SHAP values to include only retained components
+  write_csv(shap_values_linear, paste0(output_dir, "/shap_values_linear_", dataset_name, ".csv"))
+
+  # Map SHAP values back to original features
   pca_loadings <- as.matrix(pca_model$rotation[, 1:num_components])
-  original_feature_contributions <- as.data.frame(t(pca_loadings %*% as.matrix(shap_values_linear)))
-  colnames(original_feature_contributions) <- colnames(X_train)
+  original_feature_contributions_linear <- as.data.frame(t(pca_loadings %*% as.matrix(shap_values_linear)))
+  colnames(original_feature_contributions_linear) <- colnames(X_train)
   
-  # Save original feature contributions
-  write_csv(original_feature_contributions, paste0("src/modeling/ablation_study/model_output/original_feature_contributions_linear_", dataset_name, ".csv"))
+  # Save original feature contributions for linear kernel
+  write_csv(original_feature_contributions_linear, paste0(output_dir, "/original_feature_contributions_linear_", dataset_name, ".csv"))
 
   # Train SVM model with RBF kernel
   print("Training SVM model with RBF kernel...")
   svm_model_rbf <- svm(X_train_pca, y_train$x, kernel = "radial", probability = TRUE)
 
   # Predict on test set with RBF kernel
-  print("Predicting on test set with RBF kernel...")
   y_pred_rbf <- predict(svm_model_rbf, X_test_pca, probability = TRUE)
   y_prob_rbf <- attr(y_pred_rbf, "probabilities")[,2]
 
+  # Save predictions and true labels for RBF kernel
+  write_csv(data.frame(y_test = y_test$x, y_pred = y_pred_rbf), paste0(output_dir, "/predictions_rbf_", dataset_name, ".csv"))
+
   # Calculate performance metrics for RBF kernel
-  print("Calculating performance metrics for RBF kernel...")
   confusion_rbf <- confusionMatrix(y_pred_rbf, y_test$x)
   accuracy_rbf <- confusion_rbf$overall["Accuracy"]
   precision_rbf <- confusion_rbf$byClass["Pos Pred Value"]
@@ -161,36 +150,29 @@ for (dataset_name in names(datasets)) {
   performance_summary <- performance_summary %>%
     add_row(Dataset = paste(dataset_name, "RBF", sep = "_"), Accuracy = accuracy_rbf, Precision = precision_rbf, Recall = recall_rbf, F1_score = f1_score_rbf, ROC_AUC = roc_auc_rbf)
 
-  # Generate confusion matrix plot for RBF kernel
-  print("Generating confusion matrix plot for RBF kernel...")
-  confusion_matrix_plot_rbf <- as.data.frame(confusion_rbf$table)
-  p <- ggplot(confusion_matrix_plot_rbf, aes(Prediction, Reference, fill = Freq)) +
-    geom_tile() +
-    geom_text(aes(label = Freq)) +
-    scale_fill_gradient(low = "white", high = "red") +
-    ggtitle(paste("Confusion Matrix for RBF Kernel -", dataset_name))
-  ggsave(paste0("src/modeling/ablation_study/model_output/confusion_matrix_rbf_", dataset_name, ".png"), plot = p)
-
   # Generate SHAP values for RBF kernel
-  print("Generating SHAP values for RBF kernel...")
   predictor_rbf <- Predictor$new(svm_model_rbf, data = as.data.frame(X_train_pca), y = y_train$x)
   shapley_rbf <- Shapley$new(predictor_rbf, x.interest = as.data.frame(X_test_pca[1, , drop = FALSE]))
-  shapley_plot_rbf <- shapley_rbf$plot() +
-    ggtitle(paste("SHAP Values for RBF Kernel -", dataset_name))
-  ggsave(paste0("src/modeling/ablation_study/model_output/shap_rbf_", dataset_name, ".png"), plot = shapley_plot_rbf)
   
-  # Map SHAP values back to original features
-  print("Mapping SHAP values back to original features...")
+  # Save SHAP values for principal components
   shap_values_rbf <- as.data.frame(shapley_rbf$results$phi)
-  shap_values_rbf <- shap_values_rbf[1:num_components, , drop = FALSE]
+  shap_values_rbf <- shap_values_rbf[1:num_components, , drop = FALSE]  # Filter SHAP values to include only retained components
+  write_csv(shap_values_rbf, paste0(output_dir, "/shap_values_rbf_", dataset_name, ".csv"))
+
+  # Map SHAP values back to original features
   original_feature_contributions_rbf <- as.data.frame(t(pca_loadings %*% as.matrix(shap_values_rbf)))
   colnames(original_feature_contributions_rbf) <- colnames(X_train)
   
-  # Save original feature contributions
-  write_csv(original_feature_contributions_rbf, paste0("src/modeling/ablation_study/model_output/original_feature_contributions_rbf_", dataset_name, ".csv"))
+  # Save original feature contributions for RBF kernel
+  write_csv(original_feature_contributions_rbf, paste0(output_dir, "/original_feature_contributions_rbf_", dataset_name, ".csv"))
+
+  # Save SHAP values for plotting
+  saveRDS(shapley_linear, paste0(output_dir, "/shapley_linear_", dataset_name, ".rds"))
+  saveRDS(shapley_rbf, paste0(output_dir, "/shapley_rbf_", dataset_name, ".rds"))
 }
 
 # Save performance summary
-write_csv(performance_summary, "src/modeling/ablation_study/model_output/model_performance_summary.csv")
+write_csv(performance_summary, paste0(output_dir, "/model_performance_summary.csv"))
+cat("Saved performance summary:", paste0(output_dir, "/model_performance_summary.csv"), "\n")
 
 print("Script completed successfully.")
