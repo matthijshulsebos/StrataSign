@@ -31,7 +31,7 @@ plot_shap_values <- function(shapley_path, title, output_path) {
   ggsave(output_path, plot = shapley_plot)
 }
 
-plot_top_genes_per_cluster <- function(original_feature_contributions_path, dataset_name, kernel_type, n = 10) {
+plot_top_genes_per_cluster <- function(original_feature_contributions_path, dataset_name, kernel_type, n = 50) {
   print(paste("Reading original feature contributions from:", original_feature_contributions_path))
   original_feature_contributions <- fread(original_feature_contributions_path)
   print("Finished reading original feature contributions.")
@@ -53,21 +53,7 @@ plot_top_genes_per_cluster <- function(original_feature_contributions_path, data
       arrange(desc(abs(Contribution))) %>%
       head(n)
     
-    # Separate positive and negative contributions
-    positive_contributions <- cluster_contributions %>%
-      filter(Contribution > 0) %>%
-      arrange(desc(Contribution)) %>%
-      head(n)
-    
-    negative_contributions <- cluster_contributions %>%
-      filter(Contribution < 0) %>%
-      arrange(Contribution) %>%
-      head(n)
-    
-    # Combine positive and negative contributions
-    combined_contributions <- bind_rows(positive_contributions, negative_contributions)
-    
-    p <- ggplot(combined_contributions, aes(x = reorder(Feature, Contribution), y = Contribution, fill = Contribution > 0)) +
+    p <- ggplot(cluster_contributions, aes(x = reorder(Feature, Contribution), y = Contribution, fill = Contribution > 0)) +
       geom_bar(stat = "identity") +
       coord_flip() +
       scale_fill_manual(values = c("red", "blue"), labels = c("Negative", "Positive")) +
@@ -80,7 +66,7 @@ plot_top_genes_per_cluster <- function(original_feature_contributions_path, data
   }
 }
 
-plot_overview_top_genes <- function(original_feature_contributions_path, dataset_name, kernel_type, n = 10) {
+plot_overview_top_genes <- function(original_feature_contributions_path, dataset_name, kernel_type, n = 50) {
   print(paste("Reading original feature contributions from:", original_feature_contributions_path))
   original_feature_contributions <- fread(original_feature_contributions_path)
   print("Finished reading original feature contributions.")
@@ -90,21 +76,12 @@ plot_overview_top_genes <- function(original_feature_contributions_path, dataset
     gather(key = "Feature", value = "Contribution") %>%
     mutate(ClusterName = sub(".*\\|(.*)\\|.*$", "\\1", Feature))
   
-  # Separate positive and negative contributions
-  positive_contributions <- original_feature_contributions %>%
-    filter(Contribution > 0) %>%
-    arrange(desc(Contribution)) %>%
+  # Select top n most impactful genes by absolute contribution
+  top_contributions <- original_feature_contributions %>%
+    arrange(desc(abs(Contribution))) %>%
     head(n)
   
-  negative_contributions <- original_feature_contributions %>%
-    filter(Contribution < 0) %>%
-    arrange(Contribution) %>%
-    head(n)
-  
-  # Combine positive and negative contributions
-  combined_contributions <- bind_rows(positive_contributions, negative_contributions)
-  
-  p <- ggplot(combined_contributions, aes(x = reorder(Feature, Contribution), y = Contribution, fill = Contribution > 0)) +
+  p <- ggplot(top_contributions, aes(x = reorder(Feature, Contribution), y = Contribution, fill = Contribution > 0)) +
     geom_bar(stat = "identity") +
     coord_flip() +
     scale_fill_manual(values = c("red", "blue"), labels = c("Negative", "Positive")) +
@@ -136,6 +113,26 @@ plot_combined_roc_curve <- function(datasets, output_path) {
     ggtitle("Combined ROC Curves for All Datasets")
   
   print(paste("Saving combined ROC curve plot to:", output_path))
+  ggsave(output_path, plot = p)
+}
+
+plot_feature_contributions_distribution <- function(original_feature_contributions_path, dataset_name, kernel_type) {
+  print(paste("Reading original feature contributions from:", original_feature_contributions_path))
+  original_feature_contributions <- fread(original_feature_contributions_path)
+  print("Finished reading original feature contributions.")
+  
+  # Gather the data for plotting
+  original_feature_contributions <- original_feature_contributions %>%
+    gather(key = "PrincipalComponent", value = "Contribution")
+  
+  p <- ggplot(original_feature_contributions, aes(x = Contribution)) +
+    geom_density(fill = "blue", alpha = 0.5) +
+    ggtitle(paste("Distribution of Original Feature Contributions -", dataset_name, "-", kernel_type)) +
+    xlab("Contribution") +
+    ylab("Density")
+  
+  output_path <- paste0("src/modeling/ablation_study/plotting_output/feature_contributions_distribution_", dataset_name, "_", kernel_type, ".png")
+  print(paste("Saving feature contributions distribution plot to:", output_path))
   ggsave(output_path, plot = p)
 }
 
@@ -187,7 +184,7 @@ for (dataset_name in datasets) {
     paste0("src/modeling/ablation_study/model_output/original_feature_contributions_linear_", dataset_name, ".csv"),
     dataset_name,
     "linear",
-    n = 10
+    n = 50
   )
   
   print("Plotting top genes per cluster for RBF kernel...")
@@ -195,7 +192,7 @@ for (dataset_name in datasets) {
     paste0("src/modeling/ablation_study/model_output/original_feature_contributions_rbf_", dataset_name, ".csv"),
     dataset_name,
     "rbf",
-    n = 10
+    n = 50
   )
   
   # Overview of top contributing genes across all clusters
@@ -204,7 +201,7 @@ for (dataset_name in datasets) {
     paste0("src/modeling/ablation_study/model_output/original_feature_contributions_linear_", dataset_name, ".csv"),
     dataset_name,
     "linear",
-    n = 10
+    n = 50
   )
   
   print("Plotting overview of top contributing genes across all clusters for RBF kernel...")
@@ -212,7 +209,22 @@ for (dataset_name in datasets) {
     paste0("src/modeling/ablation_study/model_output/original_feature_contributions_rbf_", dataset_name, ".csv"),
     dataset_name,
     "rbf",
-    n = 10
+    n = 50
+  )
+  
+  # Distribution of original feature contributions
+  print("Plotting distribution of original feature contributions for linear kernel...")
+  plot_feature_contributions_distribution(
+    paste0("src/modeling/ablation_study/model_output/original_feature_contributions_linear_", dataset_name, ".csv"),
+    dataset_name,
+    "linear"
+  )
+  
+  print("Plotting distribution of original feature contributions for RBF kernel...")
+  plot_feature_contributions_distribution(
+    paste0("src/modeling/ablation_study/model_output/original_feature_contributions_rbf_", dataset_name, ".csv"),
+    dataset_name,
+    "rbf"
   )
 }
 

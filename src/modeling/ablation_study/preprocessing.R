@@ -60,10 +60,21 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   # Ensure count column is numeric
   counts_long$count <- as.numeric(counts_long$count)
 
+  # Normalize counts per sample using CP10K
+  counts_long <- counts_long %>%
+    group_by(sample_ID) %>%
+    mutate(total_counts = sum(count)) %>%
+    ungroup() %>%
+    mutate(normalized_count = (count / total_counts) * 10000)
+
+  # Apply log transformation
+  counts_long <- counts_long %>%
+    mutate(log_normalized_count = log1p(normalized_count))
+
   # Pivot so each gene-cluster combo becomes its own column
   counts_wide <- counts_long %>%
-    select(sample_ID, gene_cluster, count) %>%
-    pivot_wider(names_from = gene_cluster, values_from = count, values_fill = list(count = 0))
+    select(sample_ID, gene_cluster, log_normalized_count) %>%
+    pivot_wider(names_from = gene_cluster, values_from = log_normalized_count, values_fill = list(log_normalized_count = 0))
 
   # Convert 'sample_ID' column to character
   counts_wide <- counts_wide %>% mutate(sample_ID = as.character(sample_ID))
