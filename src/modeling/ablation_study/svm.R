@@ -130,14 +130,25 @@ for (dataset_name in names(datasets)) {
       add_row(Dataset = paste(dataset_name, version, "Linear", sep = "_"), Accuracy = accuracy_linear, Precision = precision_linear, Recall = recall_linear, F1_score = f1_score_linear, ROC_AUC = roc_auc_linear)
     
     # Generate SHAP values for linear kernel
+    print("Calculating SHAP values for linear kernel...")
     predictor_linear <- Predictor$new(svm_model_linear, data = as.data.frame(X_train_pca_linear), y = y_train$x)
-    shapley_linear <- Shapley$new(predictor_linear, x.interest = as.data.frame(X_test_pca_linear[1, , drop = FALSE]))
     
-    # Save SHAP values for principal components
-    shap_values_linear <- as.data.frame(shapley_linear$results$phi)
-    shap_values_linear <- shap_values_linear[1:num_components_linear, , drop = FALSE]  # Filter SHAP values to include only retained components
+    # Initialize matrix to store SHAP values for all test samples
+    all_shap_values_linear <- matrix(0, nrow = num_components_linear, ncol = nrow(X_test_pca_linear))
+    
+    # Calculate SHAP values for each test sample
+    for(i in 1:nrow(X_test_pca_linear)) {
+      if(i %% 10 == 0) print(paste("Processing sample", i, "of", nrow(X_test_pca_linear)))
+      shapley_linear <- Shapley$new(predictor_linear, x.interest = as.data.frame(X_test_pca_linear[i, , drop = FALSE]))
+      all_shap_values_linear[, i] <- shapley_linear$results$phi[1:num_components_linear]
+    }
+    
+    # Calculate mean SHAP values across all test samples
+    shap_values_linear <- data.frame(phi = rowMeans(all_shap_values_linear))
+    
+    # Save average SHAP values for principal components
     write_csv(shap_values_linear, paste0(output_dir, "/", dataset_name, "/", version, "/shap_values_linear_", dataset_name, "_", version, ".csv"))
-
+    
     # Map SHAP values back to original features using linear components
     pca_loadings_linear <- as.matrix(pca_model$rotation[, 1:num_components_linear])
     original_feature_contributions_linear <- as.data.frame(t(pca_loadings_linear %*% as.matrix(shap_values_linear)))
@@ -170,12 +181,23 @@ for (dataset_name in names(datasets)) {
       add_row(Dataset = paste(dataset_name, version, "RBF", sep = "_"), Accuracy = accuracy_rbf, Precision = precision_rbf, Recall = recall_rbf, F1_score = f1_score_rbf, ROC_AUC = roc_auc_rbf)
 
     # Generate SHAP values for RBF kernel
+    print("Calculating SHAP values for RBF kernel...")
     predictor_rbf <- Predictor$new(svm_model_rbf, data = as.data.frame(X_train_pca_rbf), y = y_train$x)
-    shapley_rbf <- Shapley$new(predictor_rbf, x.interest = as.data.frame(X_test_pca_rbf[1, , drop = FALSE]))
     
-    # Save SHAP values for principal components
-    shap_values_rbf <- as.data.frame(shapley_rbf$results$phi)
-    shap_values_rbf <- shap_values_rbf[1:num_components_rbf, , drop = FALSE]  # Filter SHAP values to include only retained components
+    # Initialize matrix to store SHAP values for all test samples
+    all_shap_values_rbf <- matrix(0, nrow = num_components_rbf, ncol = nrow(X_test_pca_rbf))
+    
+    # Calculate SHAP values for each test sample
+    for(i in 1:nrow(X_test_pca_rbf)) {
+      if(i %% 10 == 0) print(paste("Processing sample", i, "of", nrow(X_test_pca_rbf)))
+      shapley_rbf <- Shapley$new(predictor_rbf, x.interest = as.data.frame(X_test_pca_rbf[i, , drop = FALSE]))
+      all_shap_values_rbf[, i] <- shapley_rbf$results$phi[1:num_components_rbf]
+    }
+    
+    # Calculate mean SHAP values across all test samples
+    shap_values_rbf <- data.frame(phi = rowMeans(all_shap_values_rbf))
+    
+    # Save average SHAP values for principal components
     write_csv(shap_values_rbf, paste0(output_dir, "/", dataset_name, "/", version, "/shap_values_rbf_", dataset_name, "_", version, ".csv"))
 
     # Map SHAP values back to original features using RBF components
