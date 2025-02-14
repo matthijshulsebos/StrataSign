@@ -65,7 +65,11 @@ plot_top_genes_per_cluster <- function(original_feature_contributions_path, data
       coord_flip() +
       scale_fill_manual(values = c("red", "blue"), labels = c("Negative", "Positive")) +
       ggtitle(paste("Top Genes for Cluster", cluster, "-", dataset_name, "-", version, "-", kernel_type)) +
-      labs(fill = "Contribution") +
+      labs(
+        x = "Feature",
+        y = "Feature Contribution Score",
+        fill = "Direction"
+      ) +
       theme_minimal()
     
     ggsave(paste0(output_dir, "/top_genes_cluster_", cluster, "_", kernel_type, ".png"), plot = p)
@@ -96,7 +100,11 @@ plot_overview_top_genes <- function(original_feature_contributions_path, dataset
     coord_flip() +
     scale_fill_manual(values = c("red", "blue"), labels = c("Negative", "Positive")) +
     ggtitle(paste("Top Contributing Genes Across All Clusters -", dataset_name, "-", version, "-", kernel_type)) +
-    labs(fill = "Contribution") +
+    labs(
+      x = "Feature",
+      y = "Feature Contribution Score",
+      fill = "Direction"
+    ) +
     theme_minimal()
   
   ggsave(paste0(output_dir, "/top_genes_overview_", kernel_type, ".png"), plot = p)
