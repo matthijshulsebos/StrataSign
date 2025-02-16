@@ -151,11 +151,22 @@ for (dataset_name in names(datasets)) {
     
     # Map SHAP values back to original features using linear components
     pca_loadings_linear <- as.matrix(pca_model$rotation[, 1:num_components_linear])
+    
+    # Calculate regular feature contributions (with possible cancellations)
     original_feature_contributions_linear <- as.data.frame(t(pca_loadings_linear %*% as.matrix(shap_values_linear)))
     colnames(original_feature_contributions_linear) <- colnames(X_train)
     
-    # Save original feature contributions for linear kernel
-    write_csv(original_feature_contributions_linear, paste0(output_dir, "/", dataset_name, "/", version, "/original_feature_contributions_linear_", dataset_name, "_", version, ".csv"))
+    # Calculate absolute feature contributions (no cancellation)
+    abs_feature_contributions_linear <- as.data.frame(t(abs(pca_loadings_linear) %*% abs(as.matrix(shap_values_linear))))
+    colnames(abs_feature_contributions_linear) <- colnames(X_train)
+    
+    # Save both types of feature contributions for linear kernel
+    write_csv(original_feature_contributions_linear, 
+              paste0(output_dir, "/", dataset_name, "/", version, 
+                     "/original_feature_contributions_linear_", dataset_name, "_", version, ".csv"))
+    write_csv(abs_feature_contributions_linear, 
+              paste0(output_dir, "/", dataset_name, "/", version, 
+                     "/absolute_feature_contributions_linear_", dataset_name, "_", version, ".csv"))
 
     # Train SVM model with RBF kernel
     print("Training SVM model with RBF kernel...")
@@ -202,11 +213,22 @@ for (dataset_name in names(datasets)) {
 
     # Map SHAP values back to original features using RBF components
     pca_loadings_rbf <- as.matrix(pca_model$rotation[, 1:num_components_rbf])
+    
+    # Calculate regular feature contributions (with possible cancellations)
     original_feature_contributions_rbf <- as.data.frame(t(pca_loadings_rbf %*% as.matrix(shap_values_rbf)))
     colnames(original_feature_contributions_rbf) <- colnames(X_train)
     
-    # Save original feature contributions for RBF kernel
-    write_csv(original_feature_contributions_rbf, paste0(output_dir, "/", dataset_name, "/", version, "/original_feature_contributions_rbf_", dataset_name, "_", version, ".csv"))
+    # Calculate absolute feature contributions (no cancellation)
+    abs_feature_contributions_rbf <- as.data.frame(t(abs(pca_loadings_rbf) %*% abs(as.matrix(shap_values_rbf))))
+    colnames(abs_feature_contributions_rbf) <- colnames(X_train)
+    
+    # Save both types of feature contributions for RBF kernel
+    write_csv(original_feature_contributions_rbf, 
+              paste0(output_dir, "/", dataset_name, "/", version, 
+                     "/original_feature_contributions_rbf_", dataset_name, "_", version, ".csv"))
+    write_csv(abs_feature_contributions_rbf, 
+              paste0(output_dir, "/", dataset_name, "/", version, 
+                     "/absolute_feature_contributions_rbf_", dataset_name, "_", version, ".csv"))
 
     # Save SHAP values for plotting in the corresponding subdirectory
     saveRDS(shapley_linear, paste0(output_dir, "/", dataset_name, "/", version, "/shapley_linear_", dataset_name, "_", version, ".rds"))

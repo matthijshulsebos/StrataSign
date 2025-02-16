@@ -208,6 +208,110 @@ plot_pca_diagnostics <- function(pca_scores, output_dir, plot_type = "boxplot") 
   ggsave(paste0(pca_dir, "/pc1_vs_pc2_by_use_in_clustering_model.png"), plot = p2)
 }
 
+plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, dataset_name, version, kernel_type) {
+  # Set maximum dimension limit higher
+  old_max_dim <- getOption("ragg.max_dim")
+  options(ragg.max_dim = 100000)
+  on.exit(options(ragg.max_dim = old_max_dim))  # Reset on function exit
+  
+  print(paste("Reading absolute feature contributions from:", abs_feature_contributions_path))
+  abs_feature_contributions <- fread(abs_feature_contributions_path)
+  
+  # Create output directory
+  output_dir <- paste0("src/modeling/ablation_study/plotting_output/", dataset_name, "/", version, "/heatmaps/", kernel_type)
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  # Transform data for heatmap
+  contributions_long <- abs_feature_contributions %>%
+    gather(key = "feature", value = "contribution") %>%
+    # Split the feature name into components
+    separate(feature, into = c("gene", "cluster_name", "cluster_number"), sep = "\\|") %>%
+    # Combine cluster name and number if needed
+    mutate(cluster = paste(cluster_name, cluster_number)) %>%
+    # Select relevant columns and reshape to wide format for heatmap
+    select(gene, cluster, contribution) %>%
+    spread(key = cluster, value = contribution)
+  
+  # Convert to matrix for heatmap
+  contribution_matrix <- as.matrix(contributions_long[,-1])  # Remove gene column for matrix
+  rownames(contribution_matrix) <- contributions_long$gene
+  
+  # Get dimensions of the data
+  n_genes <- length(unique(contributions_long$gene))
+  n_clusters <- length(unique(contributions_long$cluster))
+  
+  # Calculate dimensions needed for readable plot
+  width_per_cluster <- 0.8    # Keep original width
+  height_per_gene <- 0.2     # Reduced for tighter spacing
+  
+  # Calculate total dimensions
+  plot_width <- max(15, n_clusters * width_per_cluster)
+  plot_height <- max(20, n_genes * height_per_gene)
+  
+  # Calculate and verify total contribution per cluster for ordering
+  cluster_totals <- contributions_long %>%
+    gather(key = "cluster", value = "contribution", -gene) %>%
+    group_by(cluster) %>%
+    summarize(
+      total_contribution = sum(abs(contribution), na.rm = TRUE)  # Add na.rm = TRUE
+    ) %>%
+    arrange(desc(total_contribution))  # Sort descending
+  
+  gene_totals <- contributions_long %>%
+    gather(key = "cluster", value = "contribution", -gene) %>%
+    group_by(gene) %>%
+    summarize(
+      total_contribution = sum(abs(contribution), na.rm = TRUE)
+    ) %>%
+    arrange(desc(total_contribution))  # Sort genes descending
+
+  # Print totals for verification
+  print("Cluster totals (in descending order):")
+  print(as.data.frame(cluster_totals))
+  print("Gene totals (in descending order):")
+  print(as.data.frame(gene_totals))
+
+  # Create heatmap with ordered clusters and genes
+  p <- ggplot(data = contributions_long %>%
+                gather(key = "cluster", value = "contribution", -gene)) +
+    geom_tile(aes(x = factor(cluster, 
+                            levels = cluster_totals$cluster),  # Order clusters left to right
+                  y = factor(gene, 
+                           levels = rev(gene_totals$gene)),  # Order genes top to bottom, reversed
+                  fill = contribution),
+              width = 0.95,
+              height = 1) +
+    scale_fill_gradient(low = "white", high = "red", name = "Absolute\nContribution") +
+    theme_minimal() +
+    theme(
+      axis.text.y = element_text(size = 5),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+      plot.title = element_text(size = 10),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.spacing = unit(0, "points"),
+      plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
+    ) +
+    scale_y_discrete(expand = c(0, 0)) +
+    scale_x_discrete(expand = c(0, 0)) +
+    coord_fixed(ratio = 0.25)  # This will make tiles 1/4 as tall as they are wide
+
+  # Save plot with adjusted dimensions
+  output_path <- paste0(output_dir, "/feature_contributions_heatmap_", dataset_name, "_", version, ".png")
+  print(paste("Saving heatmap to:", output_path))
+  
+  # Try saving with device specification
+  ggsave(output_path, 
+         plot = p, 
+         width = plot_width,
+         height = plot_height,
+         dpi = 150,           # Reduced DPI
+         limitsize = FALSE,
+         device = "png")
+}
+
 # Example usage for plotting
 datasets <- list(
   all_clusters = c("default", "random1", "random2", "random3"),
@@ -318,6 +422,25 @@ for (dataset_name in names(datasets)) {
     print("Plotting PCA diagnostics...")
     pca_scores <- fread(paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/pca_scores_", dataset_name, "_", version, ".csv"))
     plot_pca_diagnostics(pca_scores, paste0(output_dir, "/", dataset_name, "/", version), plot_type = "boxplot")
+    
+    # Add heatmap plotting for both kernels
+    print("Plotting feature contributions heatmap for linear kernel...")
+    plot_feature_contributions_heatmap(
+      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, 
+             "/absolute_feature_contributions_linear_", dataset_name, "_", version, ".csv"),
+      dataset_name,
+      version,
+      "linear"
+    )
+    
+    print("Plotting feature contributions heatmap for RBF kernel...")
+    plot_feature_contributions_heatmap(
+      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, 
+             "/absolute_feature_contributions_rbf_", dataset_name, "_", version, ".csv"),
+      dataset_name,
+      version,
+      "rbf"
+    )
   }
 }
 
