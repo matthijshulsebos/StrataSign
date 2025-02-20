@@ -1,2 +1,0 @@
-category,subcategory,ID,Description,GeneRatio,BgRatio,RichFactor,FoldEnrichment,zScore,pvalue,p.adjust,qvalue,geneID,Count
-Human Diseases,Infectious disease: bacterial,hsa05132,Salmonella infection,1/1,10/1700,0.1,170,13,0.005882352941176561,0.041176470588235925,0.01857585139318914,2597,1

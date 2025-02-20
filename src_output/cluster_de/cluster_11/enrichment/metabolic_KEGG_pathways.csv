@@ -1,4 +1,0 @@
-category,subcategory,ID,Description,GeneRatio,BgRatio,RichFactor,FoldEnrichment,zScore,pvalue,p.adjust,qvalue,geneID,Count
-Cellular Processes,Cell growth and death,hsa04217,Necroptosis,1/1,17/1700,0.058823529411764705,100,9.9498743710662,0.01000000000000012,0.015882352941176514,NA,2495,1
-Cellular Processes,Cell growth and death,hsa04216,Ferroptosis,1/1,18/1700,0.05555555555555555,94.44444444444444,9.666666666666668,0.010588235294117676,0.015882352941176514,NA,2495,1
-Metabolism,Metabolism of cofactors and vitamins,hsa00860,Porphyrin metabolism,1/1,46/1700,0.021739130434782608,36.95652173913044,5.996375716975249,0.027058823529411913,0.027058823529411913,NA,2495,1
