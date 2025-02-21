@@ -5,8 +5,12 @@ library(dplyr)
 library(pROC)
 library(tidyr)
 
-# Define base path
-base_path <- "src/modeling/ablation_study"
+# Define base paths
+intermediates_dir <- "data/ablation/intermediates/lasso"
+figures_dir <- "results/ablation/figures/lasso"
+
+# Create figures directory if it doesn't exist
+dir.create(figures_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Define datasets structure
 datasets <- list(
@@ -65,8 +69,7 @@ plot_feature_importance <- function(feature_importance_path, dataset_name, versi
       theme_minimal()
     
     # Save plot
-    output_dir <- paste0("src/modeling/ablation_study/plotting_output_lasso/", 
-                        dataset_name, "/", version)
+    output_dir <- paste0(figures_dir, "/", dataset_name, "/", version)
     dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
     output_path <- paste0(output_dir, "/feature_importance_", 
                          dataset_name, "_", version, ".png")
@@ -77,29 +80,26 @@ plot_feature_importance <- function(feature_importance_path, dataset_name, versi
   }
 }
 
-# Ensure output directory exists
-output_dir <- "src/modeling/ablation_study/plotting_output_lasso"
-if (!dir.exists(output_dir)) {
-  dir.create(output_dir, recursive = TRUE)
-}
-
 # Generate plots for each dataset and version
 for (dataset_name in names(datasets)) {
   for (version in versions) {
     print(paste("Processing dataset:", dataset_name, "version:", version))
     
+    # Create output directory for this dataset and version
+    current_figures_dir <- paste0(figures_dir, "/", dataset_name, "/", version)
+    dir.create(current_figures_dir, recursive = TRUE, showWarnings = FALSE)
+    
     # Plot confusion matrix
     plot_confusion_matrix(
-      paste0("src/modeling/ablation_study/lasso_output/", dataset_name, "/", version, 
+      paste0(intermediates_dir, "/", dataset_name, "/", version, 
              "/predictions_", dataset_name, "_", version, ".csv"),
       paste("Confusion Matrix -", dataset_name, "-", version),
-      paste0(output_dir, "/", dataset_name, "/", version, 
-             "/confusion_matrix_", dataset_name, "_", version, ".png")
+      paste0(current_figures_dir, "/confusion_matrix_", dataset_name, "_", version, ".png")
     )
     
     # Plot feature importance
     plot_feature_importance(
-      paste0("src/modeling/ablation_study/lasso_output/", dataset_name, "/", version, 
+      paste0(intermediates_dir, "/", dataset_name, "/", version, 
              "/feature_importance_", dataset_name, "_", version, ".csv"),
       dataset_name,
       version,

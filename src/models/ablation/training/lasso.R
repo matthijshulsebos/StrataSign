@@ -8,8 +8,16 @@ library(data.table)
 library(tibble)
 library(ggplot2)
 
-# Define base path and reuse dataset structure from SVM script
-base_path <- "src/modeling/ablation_study"
+# Define base path and output directories
+base_path <- "data/ablation"
+intermediates_dir <- "data/ablation/intermediates/lasso"
+models_dir <- "results/ablation/models/lasso"
+summary_dir <- "results/ablation/summary"
+
+# Create directories if they don't exist
+dir.create(intermediates_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(models_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(summary_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Define datasets structure
 create_dataset_paths <- function(dataset_name, version) {
@@ -49,15 +57,15 @@ performance_summary <- tibble(
   ROC_AUC = numeric()
 )
 
-# Ensure the output directory exists
-output_dir <- "src/modeling/ablation_study/lasso_output"
-if (!dir.exists(output_dir)) {
-  dir.create(output_dir, recursive = TRUE)
-}
-
 for (dataset_name in names(datasets)) {
   for (version in names(datasets[[dataset_name]])) {
     print(paste("Processing dataset:", dataset_name, "version:", version))
+    
+    # Create directories for current dataset and version
+    dir.create(paste0(intermediates_dir, "/", dataset_name, "/", version), 
+               recursive = TRUE, showWarnings = FALSE)
+    dir.create(paste0(models_dir, "/", dataset_name, "/", version), 
+               recursive = TRUE, showWarnings = FALSE)
     
     # Load datasets - using the same structure as SVM
     X_train <- fread(datasets[[dataset_name]][[version]]$X_train)
@@ -78,9 +86,6 @@ for (dataset_name in names(datasets)) {
     nzv <- nearZeroVar(X_train, saveMetrics = TRUE)
     X_train <- X_train[, !nzv$zeroVar, with = FALSE]
     X_test <- X_test[, !nzv$zeroVar, with = FALSE]
-    
-    # Create output directory for this dataset and version
-    dir.create(paste0(output_dir, "/", dataset_name, "/", version), recursive = TRUE, showWarnings = FALSE)
     
     # Fit LASSO model with LOOCV
     print("Training LASSO model with LOOCV...")
@@ -131,7 +136,7 @@ for (dataset_name in names(datasets)) {
     
     # Save feature importance with detailed information
     write_csv(feature_importance, 
-              paste0(output_dir, "/", dataset_name, "/", version, 
+              paste0(intermediates_dir, "/", dataset_name, "/", version, 
                      "/feature_importance_", dataset_name, "_", version, ".csv"))
     
     # Save non-zero features separately (selected by LASSO)
@@ -140,7 +145,7 @@ for (dataset_name in names(datasets)) {
       arrange(desc(Abs_Coefficient))
     
     write_csv(selected_features,
-              paste0(output_dir, "/", dataset_name, "/", version, 
+              paste0(intermediates_dir, "/", dataset_name, "/", version, 
                      "/selected_features_", dataset_name, "_", version, ".csv"))
     
     # Save predictions with proper format
@@ -149,14 +154,19 @@ for (dataset_name in names(datasets)) {
         y_test = y_test$x,  # This will be 0/1 factors
         y_pred = y_pred     # These are our 0/1 predictions
       ), 
-      paste0(output_dir, "/", dataset_name, "/", version, 
+      paste0(intermediates_dir, "/", dataset_name, "/", version, 
              "/predictions_", dataset_name, "_", version, ".csv")
     )
+
+    # Save LASSO model
+    dir.create(paste0(models_dir, "/", dataset_name, "/", version), recursive = TRUE, showWarnings = FALSE)
+    saveRDS(cv_fit, paste0(models_dir, "/", dataset_name, "/", version, 
+            "/lasso_model_", dataset_name, "_", version, ".rds"))
   }
 }
 
 # Save performance summary
-write_csv(performance_summary, paste0(output_dir, "/lasso_performance_summary.csv"))
-cat("Saved performance summary:", paste0(output_dir, "/lasso_performance_summary.csv"), "\n")
+write_csv(performance_summary, paste0(summary_dir, "/lasso_performance_summary.csv"))
+cat("Saved performance summary:", paste0(summary_dir, "/lasso_performance_summary.csv"), "\n")
 
 print("LASSO analysis completed successfully.")

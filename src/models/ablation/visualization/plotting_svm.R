@@ -47,10 +47,6 @@ plot_top_genes_per_cluster <- function(original_feature_contributions_path, data
   # Sanitize cluster names for file paths
   original_feature_contributions$ClusterName <- gsub("/", "_", original_feature_contributions$ClusterName)
   
-  # Create output directory for top genes with kernel-specific subdirectory
-  output_dir <- paste0("src/modeling/ablation_study/plotting_output/", dataset_name, "/", version, "/top_genes/", kernel_type)
-  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-  
   # Group by cluster name and plot top genes
   clusters <- unique(original_feature_contributions$ClusterName)
   for (cluster in clusters) {
@@ -72,7 +68,9 @@ plot_top_genes_per_cluster <- function(original_feature_contributions_path, data
       ) +
       theme_minimal()
     
-    ggsave(paste0(output_dir, "/top_genes_cluster_", cluster, "_", kernel_type, ".png"), plot = p)
+    output_path <- paste0(figures_dir, "/", dataset_name, "/", version, 
+                       "/top_genes_cluster_", cluster, "_", kernel_type, ".png")
+    ggsave(output_path, plot = p, width = 12, height = min(15, n * 0.25))
   }
 }
 
@@ -80,10 +78,6 @@ plot_overview_top_genes <- function(original_feature_contributions_path, dataset
   print(paste("Reading original feature contributions from:", original_feature_contributions_path))
   original_feature_contributions <- fread(original_feature_contributions_path)
   print("Finished reading original feature contributions.")
-  
-  # Create output directory for top genes overview with kernel-specific subdirectory
-  output_dir <- paste0("src/modeling/ablation_study/plotting_output/", dataset_name, "/", version, "/top_genes/", kernel_type)
-  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   
   # Extract cluster name from feature names
   original_feature_contributions <- original_feature_contributions %>%
@@ -107,17 +101,15 @@ plot_overview_top_genes <- function(original_feature_contributions_path, dataset
     ) +
     theme_minimal()
   
-  ggsave(paste0(output_dir, "/top_genes_overview_", kernel_type, ".png"), plot = p)
+  output_path <- paste0(figures_dir, "/", dataset_name, "/", version,
+                       "/top_genes_overview_", kernel_type, ".png")
+  ggsave(output_path, plot = p, width = 12, height = min(15, n * 0.25))
 }
 
 plot_feature_contributions_distribution <- function(original_feature_contributions_path, dataset_name, version, kernel_type) {
   print(paste("Reading original feature contributions from:", original_feature_contributions_path))
   original_feature_contributions <- fread(original_feature_contributions_path)
   print("Finished reading original feature contributions.")
-  
-  # Create output directory for feature contributions
-  output_dir <- paste0("src/modeling/ablation_study/plotting_output/", dataset_name, "/", version, "/feature_contributions")
-  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   
   # Gather the data for plotting
   original_feature_contributions <- original_feature_contributions %>%
@@ -139,22 +131,29 @@ plot_combined_roc_curve <- function(datasets, output_path) {
   
   for (dataset_name in datasets) {
     print(paste("Reading predictions for dataset:", dataset_name))
-    predictions_linear <- fread(paste0("src/modeling/ablation_study/model_output/", dataset_name, "/default/predictions_linear_", dataset_name, "_default.csv"))
-    predictions_rbf <- fread(paste0("src/modeling/ablation_study/model_output/", dataset_name, "/default/predictions_rbf_", dataset_name, "_default.csv"))
     
+    # Read predictions for both kernels
+    predictions_linear <- fread(paste0(intermediates_dir, "/svm/", dataset_name, "/default/predictions_linear_", dataset_name, "_default.csv"))
+    predictions_rbf <- fread(paste0(intermediates_dir, "/svm/", dataset_name, "/default/predictions_rbf_", dataset_name, "_default.csv"))
+    
+    # Calculate ROC curves
     roc_curve_linear <- roc(predictions_linear$y_test, predictions_linear$y_pred)
     roc_curve_rbf <- roc(predictions_rbf$y_test, predictions_rbf$y_pred)
     
+    # Store ROC curves with dataset and kernel labels
     roc_curves[[paste(dataset_name, "Linear")]] <- roc_curve_linear
     roc_curves[[paste(dataset_name, "RBF")]] <- roc_curve_rbf
   }
   
+  # Create plot with legend
   p <- ggroc(roc_curves) +
     ggtitle("Combined ROC Curves for Default Models") +
-    theme_minimal()
+    theme_minimal() +
+    theme(legend.position = "bottom") +
+    scale_color_brewer(palette = "Set1")
   
   print(paste("Saving combined ROC curve plot to:", output_path))
-  ggsave(output_path, plot = p)
+  ggsave(output_path, plot = p, width = 10, height = 8)
 }
 
 # Function to plot PCA diagnostics
@@ -209,107 +208,87 @@ plot_pca_diagnostics <- function(pca_scores, output_dir, plot_type = "boxplot") 
 }
 
 plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, dataset_name, version, kernel_type) {
-  # Set maximum dimension limit higher
-  old_max_dim <- getOption("ragg.max_dim")
-  options(ragg.max_dim = 100000)
-  on.exit(options(ragg.max_dim = old_max_dim))  # Reset on function exit
+  # Read and process data
+  contributions_df <- fread(abs_feature_contributions_path)
   
-  print(paste("Reading absolute feature contributions from:", abs_feature_contributions_path))
-  abs_feature_contributions <- fread(abs_feature_contributions_path)
-  
-  # Create output directory
-  output_dir <- paste0("src/modeling/ablation_study/plotting_output/", dataset_name, "/", version, "/heatmaps/", kernel_type)
-  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-  
-  # Transform data for heatmap
-  contributions_long <- abs_feature_contributions %>%
+  # Transform to long format and decompose feature names
+  contributions_long <- contributions_df %>%
     gather(key = "feature", value = "contribution") %>%
-    # Split the feature name into components
     separate(feature, into = c("gene", "cluster_name", "cluster_number"), sep = "\\|") %>%
-    # Combine cluster name and number if needed
-    mutate(cluster = paste(cluster_name, cluster_number)) %>%
-    # Select relevant columns and reshape to wide format for heatmap
-    select(gene, cluster, contribution) %>%
-    spread(key = cluster, value = contribution)
-  
-  # Convert to matrix for heatmap
-  contribution_matrix <- as.matrix(contributions_long[,-1])  # Remove gene column for matrix
-  rownames(contribution_matrix) <- contributions_long$gene
-  
-  # Get dimensions of the data
-  n_genes <- length(unique(contributions_long$gene))
-  n_clusters <- length(unique(contributions_long$cluster))
-  
-  # Calculate dimensions needed for readable plot
-  width_per_cluster <- 0.8    # Keep original width
-  height_per_gene <- 0.2     # Reduced for tighter spacing
-  
-  # Calculate total dimensions
-  plot_width <- max(15, n_clusters * width_per_cluster)
-  plot_height <- max(20, n_genes * height_per_gene)
-  
-  # Calculate and verify total contribution per cluster for ordering
-  cluster_totals <- contributions_long %>%
-    gather(key = "cluster", value = "contribution", -gene) %>%
-    group_by(cluster) %>%
-    summarize(
-      total_contribution = sum(abs(contribution), na.rm = TRUE)  # Add na.rm = TRUE
+    mutate(
+      cluster = paste(cluster_name, cluster_number),
+      # Explicitly replace NA with 0
+      contribution = ifelse(is.na(contribution), 0, as.numeric(contribution))
     ) %>%
-    arrange(desc(total_contribution))  # Sort descending
+    select(gene, cluster, contribution)
   
-  gene_totals <- contributions_long %>%
-    gather(key = "cluster", value = "contribution", -gene) %>%
+  # Sort by total contribution
+  gene_importance <- contributions_long %>%
     group_by(gene) %>%
-    summarize(
-      total_contribution = sum(abs(contribution), na.rm = TRUE)
-    ) %>%
-    arrange(desc(total_contribution))  # Sort genes descending
-
-  # Print totals for verification
-  print("Cluster totals (in descending order):")
-  print(as.data.frame(cluster_totals))
-  print("Gene totals (in descending order):")
-  print(as.data.frame(gene_totals))
-
-  # Create heatmap with ordered clusters and genes
-  p <- ggplot(data = contributions_long %>%
-                gather(key = "cluster", value = "contribution", -gene)) +
-    geom_tile(aes(x = factor(cluster, 
-                            levels = cluster_totals$cluster),  # Order clusters left to right
-                  y = factor(gene, 
-                           levels = rev(gene_totals$gene)),  # Order genes top to bottom, reversed
-                  fill = contribution),
-              width = 0.95,
-              height = 1) +
-    scale_fill_gradient(low = "white", high = "red", name = "Absolute\nContribution") +
+    summarize(total_impact = sum(abs(contribution))) %>%
+    arrange(desc(total_impact))
+  
+  cluster_importance <- contributions_long %>%
+    group_by(cluster) %>%
+    summarize(total_impact = sum(abs(contribution))) %>%
+    arrange(desc(total_impact))
+  
+  # Create heatmap with tile outlines
+  p <- ggplot(contributions_long, 
+             aes(x = factor(cluster, levels = cluster_importance$cluster),
+                 y = factor(gene, levels = rev(gene_importance$gene)),
+                 fill = contribution)) +
+    # Add thin black lines around tiles
+    geom_tile(color = "grey90", size = 0.1) +
+    scale_fill_gradient2(
+      low = "blue",
+      mid = "white",
+      high = "red",
+      midpoint = 0,
+      name = "Contribution",
+      na.value = "white"  # Set NA color to white (though NAs should be 0s now)
+    ) +
     theme_minimal() +
     theme(
-      axis.text.y = element_text(size = 5),
-      axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
-      plot.title = element_text(size = 10),
-      axis.title.x = element_blank(),
-      axis.title.y = element_blank(),
-      panel.grid.major = element_blank(),
-      panel.grid.minor = element_blank(),
-      panel.spacing = unit(0, "points"),
-      plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
+      axis.text.x = element_text(
+        angle = 90,
+        hjust = 1,
+        vjust = 0.5,
+        size = 6,
+        margin = margin(t = 10)
+      ),
+      axis.text.y = element_text(
+        size = 4,
+        hjust = 1,
+        margin = margin(r = 5)
+      ),
+      axis.title = element_blank(),
+      panel.grid = element_blank(),
+      plot.margin = margin(t = 5, r = 20, b = 50, l = 120),
+      legend.position = "right",
+      legend.key.height = unit(1, "cm")
     ) +
-    scale_y_discrete(expand = c(0, 0)) +
     scale_x_discrete(expand = c(0, 0)) +
-    coord_fixed(ratio = 0.25)  # This will make tiles 1/4 as tall as they are wide
+    scale_y_discrete(expand = c(0, 0))
 
-  # Save plot with adjusted dimensions
-  output_path <- paste0(output_dir, "/feature_contributions_heatmap_", dataset_name, "_", version, ".png")
-  print(paste("Saving heatmap to:", output_path))
+  # Calculate dimensions
+  n_clusters <- length(unique(contributions_long$cluster))
+  n_genes <- length(unique(contributions_long$gene))
   
-  # Try saving with device specification
-  ggsave(output_path, 
-         plot = p, 
-         width = plot_width,
-         height = plot_height,
-         dpi = 150,           # Reduced DPI
-         limitsize = FALSE,
-         device = "png")
+  # Calculate dimensions to ensure proper tile height
+  width <- min(25, max(15, n_clusters * 0.4))
+  height <- min(120, max(60, n_genes * 0.3))  # Increased height significantly
+  
+  # Add aspect ratio directly in ggsave
+  ggsave(
+    file.path(figures_dir, dataset_name, version,
+              paste0("feature_heatmap_", kernel_type, "_", dataset_name, "_", version, ".png")),
+    plot = p,
+    width = width,
+    height = height,
+    dpi = 400,
+    limitsize = FALSE
+  )
 }
 
 # Example usage for plotting
@@ -320,53 +299,56 @@ datasets <- list(
   lcam_both = c("default", "random1", "random2", "random3")
 )
 
-# Ensure the output directory exists
-output_dir <- "src/modeling/ablation_study/plotting_output"
-if (!dir.exists(output_dir)) {
-  dir.create(output_dir, recursive = TRUE)
-}
+# Update base paths at the start of the script
+intermediates_dir <- "data/ablation/intermediates"
+results_dir <- "results/ablation"
+figures_dir <- "results/ablation/figures/svm"  # Updated to include svm subdirectory
+
+# Create output directory if it doesn't exist
+dir.create(figures_dir, recursive = TRUE, showWarnings = FALSE)
 
 for (dataset_name in names(datasets)) {
   for (version in datasets[[dataset_name]]) {
     print(paste("Processing dataset:", dataset_name, "version:", version))
     
     # Create output directory for this dataset and version
-    dir.create(paste0(output_dir, "/", dataset_name, "/", version), recursive = TRUE, showWarnings = FALSE)
+    current_figures_dir <- paste0(figures_dir, "/", dataset_name, "/", version)
+    dir.create(current_figures_dir, recursive = TRUE, showWarnings = FALSE)
     
     # Confusion matrices
     print("Plotting confusion matrix for linear kernel...")
     plot_confusion_matrix(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/predictions_linear_", dataset_name, "_", version, ".csv"),
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, "/predictions_linear_", dataset_name, "_", version, ".csv"),
       paste("Confusion Matrix for Linear Kernel -", dataset_name, "-", version),
-      paste0(output_dir, "/", dataset_name, "/", version, "/confusion_matrix_linear_", dataset_name, "_", version, ".png")
+      paste0(current_figures_dir, "/confusion_matrix_linear_", dataset_name, "_", version, ".png")
     )
     
     print("Plotting confusion matrix for RBF kernel...")
     plot_confusion_matrix(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/predictions_rbf_", dataset_name, "_", version, ".csv"),
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, "/predictions_rbf_", dataset_name, "_", version, ".csv"),
       paste("Confusion Matrix for RBF Kernel -", dataset_name, "-", version),
-      paste0(output_dir, "/", dataset_name, "/", version, "/confusion_matrix_rbf_", dataset_name, "_", version, ".png")
+      paste0(current_figures_dir, "/confusion_matrix_rbf_", dataset_name, "_", version, ".png")
     )
     
     # SHAP values
     print("Plotting SHAP values for linear kernel...")
     plot_shap_values(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/shapley_linear_", dataset_name, "_", version, ".rds"),
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, "/shapley_linear_", dataset_name, "_", version, ".rds"),
       paste("SHAP Values for Linear Kernel -", dataset_name, "-", version),
-      paste0(output_dir, "/", dataset_name, "/", version, "/shap_linear_", dataset_name, "_", version, ".png")
+      paste0(current_figures_dir, "/shap_linear_", dataset_name, "_", version, ".png")
     )
     
     print("Plotting SHAP values for RBF kernel...")
     plot_shap_values(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/shapley_rbf_", dataset_name, "_", version, ".rds"),
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, "/shapley_rbf_", dataset_name, "_", version, ".rds"),
       paste("SHAP Values for RBF Kernel -", dataset_name, "-", version),
-      paste0(output_dir, "/", dataset_name, "/", version, "/shap_rbf_", dataset_name, "_", version, ".png")
+      paste0(current_figures_dir, "/shap_rbf_", dataset_name, "_", version, ".png")
     )
     
     # Top genes per cluster
     print("Plotting top genes per cluster for linear kernel...")
     plot_top_genes_per_cluster(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/original_feature_contributions_linear_", dataset_name, "_", version, ".csv"),
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, "/original_feature_contributions_linear_", dataset_name, "_", version, ".csv"),
       dataset_name,  # Pass dataset_name and version separately
       version,
       "linear",
@@ -375,7 +357,7 @@ for (dataset_name in names(datasets)) {
     
     print("Plotting top genes per cluster for RBF kernel...")
     plot_top_genes_per_cluster(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/original_feature_contributions_rbf_", dataset_name, "_", version, ".csv"),
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, "/original_feature_contributions_rbf_", dataset_name, "_", version, ".csv"),
       dataset_name,  # Pass dataset_name and version separately
       version,
       "rbf",
@@ -385,7 +367,7 @@ for (dataset_name in names(datasets)) {
     # Overview of top contributing genes across all clusters
     print("Plotting overview of top contributing genes...")
     plot_overview_top_genes(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/original_feature_contributions_linear_", dataset_name, "_", version, ".csv"),
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, "/original_feature_contributions_linear_", dataset_name, "_", version, ".csv"),
       dataset_name,  # Pass dataset_name and version separately
       version,
       "linear",
@@ -394,7 +376,7 @@ for (dataset_name in names(datasets)) {
     
     print("Plotting overview of top contributing genes for RBF kernel...")
     plot_overview_top_genes(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/original_feature_contributions_rbf_", dataset_name, "_", version, ".csv"),
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, "/original_feature_contributions_rbf_", dataset_name, "_", version, ".csv"),
       dataset_name,  # Pass dataset_name and version separately
       version,
       "rbf",
@@ -404,7 +386,7 @@ for (dataset_name in names(datasets)) {
     # Distribution of original feature contributions
     print("Plotting distribution of original feature contributions...")
     plot_feature_contributions_distribution(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/original_feature_contributions_linear_", dataset_name, "_", version, ".csv"),
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, "/original_feature_contributions_linear_", dataset_name, "_", version, ".csv"),
       dataset_name,  # Pass dataset_name and version separately
       version,
       "linear"
@@ -412,7 +394,7 @@ for (dataset_name in names(datasets)) {
     
     print("Plotting distribution of original feature contributions for RBF kernel...")
     plot_feature_contributions_distribution(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/original_feature_contributions_rbf_", dataset_name, "_", version, ".csv"),
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, "/original_feature_contributions_rbf_", dataset_name, "_", version, ".csv"),
       dataset_name,  # Pass dataset_name and version separately
       version,
       "rbf"
@@ -420,13 +402,13 @@ for (dataset_name in names(datasets)) {
     
     # PCA diagnostics
     print("Plotting PCA diagnostics...")
-    pca_scores <- fread(paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, "/pca_scores_", dataset_name, "_", version, ".csv"))
-    plot_pca_diagnostics(pca_scores, paste0(output_dir, "/", dataset_name, "/", version), plot_type = "boxplot")
+    pca_scores <- fread(paste0(intermediates_dir, "/svm/", dataset_name, "/", version, "/pca_scores_", dataset_name, "_", version, ".csv"))
+    plot_pca_diagnostics(pca_scores, current_figures_dir, plot_type = "boxplot")
     
     # Add heatmap plotting for both kernels
     print("Plotting feature contributions heatmap for linear kernel...")
     plot_feature_contributions_heatmap(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, 
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, 
              "/absolute_feature_contributions_linear_", dataset_name, "_", version, ".csv"),
       dataset_name,
       version,
@@ -435,7 +417,7 @@ for (dataset_name in names(datasets)) {
     
     print("Plotting feature contributions heatmap for RBF kernel...")
     plot_feature_contributions_heatmap(
-      paste0("src/modeling/ablation_study/model_output/", dataset_name, "/", version, 
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, 
              "/absolute_feature_contributions_rbf_", dataset_name, "_", version, ".csv"),
       dataset_name,
       version,
@@ -445,6 +427,6 @@ for (dataset_name in names(datasets)) {
 }
 
 # Combined ROC curves for all datasets and versions
-plot_combined_roc_curve(names(datasets), paste0(output_dir, "/combined_roc_curves.png"))
+plot_combined_roc_curve(names(datasets), paste0(figures_dir, "/combined_roc_curves.png"))
 
 print("Script completed successfully.")

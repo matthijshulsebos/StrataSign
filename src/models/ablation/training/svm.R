@@ -9,7 +9,7 @@ library(tibble)
 library(ggplot2)
 
 # Define base path
-base_path <- "src/modeling/ablation_study"
+base_path <- "data/ablation"
 
 # Define datasets structure
 create_dataset_paths <- function(dataset_name, version) {
@@ -49,11 +49,18 @@ performance_summary <- tibble(
   ROC_AUC = numeric()
 )
 
-# Ensure the output directory exists
-output_dir <- "src/modeling/ablation_study/model_output"
-if (!dir.exists(output_dir)) {
-  dir.create(output_dir, recursive = TRUE)
-}
+# Update output directories at the start of the script
+intermediates_dir <- "data/ablation/intermediates/svm"
+models_dir <- "results/ablation/models/svm"
+summary_dir <- "results/ablation/summary"
+dir.create(summary_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Create directories if they don't exist
+dir.create(intermediates_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(models_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Replace existing output_dir definition
+output_dir <- intermediates_dir
 
 for (dataset_name in names(datasets)) {
   for (version in names(datasets[[dataset_name]])) {
@@ -104,18 +111,23 @@ for (dataset_name in names(datasets)) {
     pca_scores <- as.data.frame(X_train_pca_linear)
     pca_scores <- cbind(metadata, pca_scores)
     dir.create(paste0(output_dir, "/", dataset_name, "/", version), recursive = TRUE, showWarnings = FALSE)
-    write_csv(pca_scores, paste0(output_dir, "/", dataset_name, "/", version, "/pca_scores_", dataset_name, "_", version, ".csv"))
+    write_csv(pca_scores, paste0(intermediates_dir, "/", dataset_name, "/", version, "/pca_scores_", dataset_name, "_", version, ".csv"))
     
     # Train SVM model with linear kernel
     print("Training SVM model with linear kernel...")
     svm_model_linear <- svm(X_train_pca_linear, y_train$x, kernel = "linear", probability = TRUE)
+    
+    # Save linear SVM model
+    dir.create(paste0(models_dir, "/", dataset_name, "/", version), recursive = TRUE, showWarnings = FALSE)
+    saveRDS(svm_model_linear, paste0(models_dir, "/", dataset_name, "/", version, "/svm_model_linear_", dataset_name, "_", version, ".rds"))
 
     # Predict on test set with linear kernel
     y_pred_linear <- predict(svm_model_linear, X_test_pca_linear, probability = TRUE)
     y_prob_linear <- attr(y_pred_linear, "probabilities")[,2]
 
     # Save predictions and true labels for linear kernel
-    write_csv(data.frame(y_test = y_test$x, y_pred = y_pred_linear), paste0(output_dir, "/", dataset_name, "/", version, "/predictions_linear_", dataset_name, "_", version, ".csv"))
+    write_csv(data.frame(y_test = y_test$x, y_pred = y_pred_linear), 
+         paste0(intermediates_dir, "/", dataset_name, "/", version, "/predictions_linear_", dataset_name, "_", version, ".csv"))
 
     # Calculate performance metrics for linear kernel
     confusion_linear <- confusionMatrix(y_pred_linear, y_test$x)
@@ -147,8 +159,9 @@ for (dataset_name in names(datasets)) {
     shap_values_linear <- data.frame(phi = rowMeans(all_shap_values_linear))
     
     # Save average SHAP values for principal components
-    write_csv(shap_values_linear, paste0(output_dir, "/", dataset_name, "/", version, "/shap_values_linear_", dataset_name, "_", version, ".csv"))
-    
+    write_csv(shap_values_linear, 
+         paste0(intermediates_dir, "/", dataset_name, "/", version, "/shap_values_linear_", dataset_name, "_", version, ".csv"))
+
     # Map SHAP values back to original features using linear components
     pca_loadings_linear <- as.matrix(pca_model$rotation[, 1:num_components_linear])
     
@@ -162,22 +175,25 @@ for (dataset_name in names(datasets)) {
     
     # Save both types of feature contributions for linear kernel
     write_csv(original_feature_contributions_linear, 
-              paste0(output_dir, "/", dataset_name, "/", version, 
+              paste0(intermediates_dir, "/", dataset_name, "/", version, 
                      "/original_feature_contributions_linear_", dataset_name, "_", version, ".csv"))
     write_csv(abs_feature_contributions_linear, 
-              paste0(output_dir, "/", dataset_name, "/", version, 
+              paste0(intermediates_dir, "/", dataset_name, "/", version, 
                      "/absolute_feature_contributions_linear_", dataset_name, "_", version, ".csv"))
 
     # Train SVM model with RBF kernel
     print("Training SVM model with RBF kernel...")
     svm_model_rbf <- svm(X_train_pca_rbf, y_train$x, kernel = "radial", probability = TRUE)
+    
+    # Save RBF SVM model
+    saveRDS(svm_model_rbf, paste0(models_dir, "/", dataset_name, "/", version, "/svm_model_rbf_", dataset_name, "_", version, ".rds"))
 
     # Predict on test set with RBF kernel
     y_pred_rbf <- predict(svm_model_rbf, X_test_pca_rbf, probability = TRUE)
     y_prob_rbf <- attr(y_pred_rbf, "probabilities")[,2]
 
     # Save predictions and true labels for RBF kernel
-    write_csv(data.frame(y_test = y_test$x, y_pred = y_pred_rbf), paste0(output_dir, "/", dataset_name, "/", version, "/predictions_rbf_", dataset_name, "_", version, ".csv"))
+    write_csv(data.frame(y_test = y_test$x, y_pred = y_pred_rbf), paste0(intermediates_dir, "/", dataset_name, "/", version, "/predictions_rbf_", dataset_name, "_", version, ".csv"))
 
     # Calculate performance metrics for RBF kernel
     confusion_rbf <- confusionMatrix(y_pred_rbf, y_test$x)
@@ -209,7 +225,7 @@ for (dataset_name in names(datasets)) {
     shap_values_rbf <- data.frame(phi = rowMeans(all_shap_values_rbf))
     
     # Save average SHAP values for principal components
-    write_csv(shap_values_rbf, paste0(output_dir, "/", dataset_name, "/", version, "/shap_values_rbf_", dataset_name, "_", version, ".csv"))
+    write_csv(shap_values_rbf, paste0(intermediates_dir, "/", dataset_name, "/", version, "/shap_values_rbf_", dataset_name, "_", version, ".csv"))
 
     # Map SHAP values back to original features using RBF components
     pca_loadings_rbf <- as.matrix(pca_model$rotation[, 1:num_components_rbf])
@@ -224,20 +240,20 @@ for (dataset_name in names(datasets)) {
     
     # Save both types of feature contributions for RBF kernel
     write_csv(original_feature_contributions_rbf, 
-              paste0(output_dir, "/", dataset_name, "/", version, 
+              paste0(intermediates_dir, "/", dataset_name, "/", version, 
                      "/original_feature_contributions_rbf_", dataset_name, "_", version, ".csv"))
     write_csv(abs_feature_contributions_rbf, 
-              paste0(output_dir, "/", dataset_name, "/", version, 
+              paste0(intermediates_dir, "/", dataset_name, "/", version, 
                      "/absolute_feature_contributions_rbf_", dataset_name, "_", version, ".csv"))
 
-    # Save SHAP values for plotting in the corresponding subdirectory
-    saveRDS(shapley_linear, paste0(output_dir, "/", dataset_name, "/", version, "/shapley_linear_", dataset_name, "_", version, ".rds"))
-    saveRDS(shapley_rbf, paste0(output_dir, "/", dataset_name, "/", version, "/shapley_rbf_", dataset_name, "_", version, ".rds"))
+    # Save SHAP values for plotting in the intermediates directory instead of models
+    saveRDS(shapley_linear, paste0(intermediates_dir, "/", dataset_name, "/", version, "/shapley_linear_", dataset_name, "_", version, ".rds"))
+    saveRDS(shapley_rbf, paste0(intermediates_dir, "/", dataset_name, "/", version, "/shapley_rbf_", dataset_name, "_", version, ".rds"))
   }
 }
 
 # Save performance summary
-write_csv(performance_summary, paste0(output_dir, "/model_performance_summary.csv"))
-cat("Saved performance summary:", paste0(output_dir, "/model_performance_summary.csv"), "\n")
+write_csv(performance_summary, paste0(summary_dir, "/svm_performance_summary.csv"))
+cat("Saved performance summary:", paste0(summary_dir, "/svm_performance_summary.csv"), "\n")
 
 print("Script completed successfully.")

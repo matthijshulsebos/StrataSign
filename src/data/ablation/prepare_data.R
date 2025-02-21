@@ -7,12 +7,12 @@ library(scales)
 # Load data
 if (!exists("lung_ldm")) {
   message("Loading Mt. Sinai scRNAseq data into R")
-  load("data/lung_ldm.rd")
+  load("base/data/lung_ldm.rd")
 }
 
-table_s1 <- read_csv("input_tables/table_s1_sample_table.csv")
-annots_list <- read_csv("input_tables/annots_list.csv")
-hsa01100_genes <- read_csv("src_output/KEGG/hsa01100_genes.csv")
+table_s1 <- read_csv("base/input_tables/table_s1_sample_table.csv")
+annots_list <- read_csv("base/input_tables/annots_list.csv")
+hsa01100_genes <- read_csv("data/kegg/hsa01100_genes.csv")
 
 # Extract metadata
 table_s1 <- table_s1 %>% filter(Use.in.Clustering.Model. == "Yes")
@@ -99,11 +99,11 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   test <- test %>% select(-tissue)
   
   # Create directories if they don't exist
-  dir.create(paste0("src/modeling/ablation_study/datasets/", subset_name, "/default"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(paste0("data/ablation/datasets/", subset_name, "/default"), recursive = TRUE, showWarnings = FALSE)
   
   # Save metadata in the order of the training set
   metadata_train <- table_s1 %>% filter(sample_ID %in% train$sample_ID) %>% arrange(match(sample_ID, train$sample_ID))
-  write_csv(metadata_train, paste0("src/modeling/ablation_study/datasets/", subset_name, "/default/metadata_", subset_name, ".csv"))
+  write_csv(metadata_train, paste0("data/ablation/datasets/", subset_name, "/default/metadata_", subset_name, ".csv"))
 
   # Remove 'sample_ID' and 'patient_ID' from train and test datasets
   train <- train %>% select(-sample_ID, -patient_ID)
@@ -122,10 +122,10 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   }
 
   # Save outputs
-  write_csv(train, paste0("src/modeling/ablation_study/datasets/", subset_name, "/default/X_train_", subset_name, ".csv"))
-  write_csv(test, paste0("src/modeling/ablation_study/datasets/", subset_name, "/default/X_test_", subset_name, ".csv"))
-  write_csv(data.frame(x = y_train), paste0("src/modeling/ablation_study/datasets/", subset_name, "/default/y_train_", subset_name, ".csv"))
-  write_csv(data.frame(x = y_test), paste0("src/modeling/ablation_study/datasets/", subset_name, "/default/y_test_", subset_name, ".csv"))
+  write_csv(train, paste0("data/ablation/datasets/", subset_name, "/default/X_train_", subset_name, ".csv"))
+  write_csv(test, paste0("data/ablation/datasets/", subset_name, "/default/X_test_", subset_name, ".csv"))
+  write_csv(data.frame(x = y_train), paste0("data/ablation/datasets/", subset_name, "/default/y_train_", subset_name, ".csv"))
+  write_csv(data.frame(x = y_test), paste0("data/ablation/datasets/", subset_name, "/default/y_test_", subset_name, ".csv"))
 }
 
 # Function to preprocess count data with random genes for a given cluster subset
@@ -157,7 +157,7 @@ preprocess_counts_random_genes <- function(cluster_subset, subset_name, random_v
   }
   
   # Create directories if they don't exist
-  dir.create(paste0("src/modeling/ablation_study/datasets/", subset_name, "/", random_version), recursive = TRUE, showWarnings = FALSE)
+  dir.create(paste0("data/ablation/datasets/", subset_name, "/", random_version), recursive = TRUE, showWarnings = FALSE)
   
   # Save overlap information
   overlap_info <- data.frame(
@@ -168,7 +168,7 @@ preprocess_counts_random_genes <- function(cluster_subset, subset_name, random_v
     overlap_percentage = round(length(overlap) / length(random_genes) * 100, 2),
     overlapping_genes = paste(overlap, collapse = ", ")
   )
-  write_csv(overlap_info, paste0("src/modeling/ablation_study/datasets/", subset_name, "/", random_version, "/gene_overlap_info.csv"))
+  write_csv(overlap_info, paste0("data/ablation/datasets/", subset_name, "/", random_version, "/gene_overlap_info.csv"))
   
   counts <- counts[, random_genes, , drop = FALSE]
   
@@ -233,11 +233,11 @@ preprocess_counts_random_genes <- function(cluster_subset, subset_name, random_v
   test <- test %>% select(-tissue)
   
   # Create directories if they don't exist
-  dir.create(paste0("src/modeling/ablation_study/datasets/", subset_name, "/", random_version), recursive = TRUE, showWarnings = FALSE)
+  dir.create(paste0("data/ablation/datasets/", subset_name, "/", random_version), recursive = TRUE, showWarnings = FALSE)
   
   # Save metadata in the order of the training set
   metadata_train <- table_s1 %>% filter(sample_ID %in% train$sample_ID) %>% arrange(match(sample_ID, train$sample_ID))
-  write_csv(metadata_train, paste0("src/modeling/ablation_study/datasets/", subset_name, "/", random_version, "/metadata_", subset_name, "_", random_version, ".csv"))
+  write_csv(metadata_train, paste0("data/ablation/datasets/", subset_name, "/", random_version, "/metadata_", subset_name, "_", random_version, ".csv"))
 
   # Remove 'sample_ID' and 'patient_ID' from train and test datasets
   train <- train %>% select(-sample_ID, -patient_ID)
@@ -256,10 +256,11 @@ preprocess_counts_random_genes <- function(cluster_subset, subset_name, random_v
   }
 
   # Save outputs
-  write_csv(train, paste0("src/modeling/ablation_study/datasets/", subset_name, "/", random_version, "/X_train_", subset_name, "_", random_version, ".csv"))
-  write_csv(test, paste0("src/modeling/ablation_study/datasets/", subset_name, "/", random_version, "/X_test_", subset_name, "_", random_version, ".csv"))
-  write_csv(data.frame(x = y_train), paste0("src/modeling/ablation_study/datasets/", subset_name, "/", random_version, "/y_train_", subset_name, "_", random_version, ".csv"))
-  write_csv(data.frame(x = y_test), paste0("src/modeling/ablation_study/datasets/", subset_name, "/", random_version, "/y_test_", subset_name, "_", random_version, ".csv"))
+  write_csv(train, paste0("data/ablation/datasets/", subset_name, "/", random_version, "/X_train_", subset_name, "_", random_version, ".csv"))
+  write_csv(test, paste0("data/ablation/datasets/", subset_name, "/", random_version, "/X_test_", subset_name, "_", random_version, ".csv"))
+  write_csv(data.frame(x = y_train), paste0("data/ablation/datasets/", subset_name, "/", random_version, "/y_train_", subset_name, "_", random_version, ".csv"))
+  write_csv(data.frame(x = y_test), paste0("data/ablation/datasets/", subset_name, "/", random_version, "/y_test_", subset_name, "_", random_version, ".csv"))
+  write_csv(overlap_info, paste0("data/ablation/datasets/", subset_name, "/", random_version, "/gene_overlap_info.csv"))
 }
 
 # Process all cluster subsets with metabolic genes
