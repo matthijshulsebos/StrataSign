@@ -217,10 +217,24 @@ plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, d
     separate(feature, into = c("gene", "cluster_name", "cluster_number"), sep = "\\|") %>%
     mutate(
       cluster = paste(cluster_name, cluster_number),
-      # Explicitly replace NA with 0
-      contribution = ifelse(is.na(contribution), 0, as.numeric(contribution))
+      contribution = as.numeric(contribution),
+      # Replace NAs and scale contributions
+      contribution = ifelse(is.na(contribution), 0, contribution * 1000)
     ) %>%
     select(gene, cluster, contribution)
+  
+  # Create complete gene x cluster grid to ensure no missing combinations
+  all_genes <- unique(contributions_long$gene)
+  all_clusters <- unique(contributions_long$cluster)
+  complete_grid <- expand.grid(
+    gene = all_genes,
+    cluster = all_clusters,
+    stringsAsFactors = FALSE
+  )
+  
+  # Join with actual data, filling missing combinations with 0
+  contributions_long <- left_join(complete_grid, contributions_long, by = c("gene", "cluster")) %>%
+    mutate(contribution = ifelse(is.na(contribution), 0, contribution))
   
   # Sort by total contribution
   gene_importance <- contributions_long %>%
@@ -233,20 +247,23 @@ plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, d
     summarize(total_impact = sum(abs(contribution))) %>%
     arrange(desc(total_impact))
   
-  # Create heatmap with tile outlines
+  # Create heatmap with modified color scaling
   p <- ggplot(contributions_long, 
              aes(x = factor(cluster, levels = cluster_importance$cluster),
                  y = factor(gene, levels = rev(gene_importance$gene)),
                  fill = contribution)) +
-    # Add thin black lines around tiles
     geom_tile(color = "grey90", size = 0.1) +
     scale_fill_gradient2(
       low = "blue",
       mid = "white",
       high = "red",
       midpoint = 0,
-      name = "Contribution",
-      na.value = "white"  # Set NA color to white (though NAs should be 0s now)
+      name = "Contribution\n(×1000)",
+      # Symmetric limits around zero
+      limits = c(-max(abs(contributions_long$contribution)), 
+                max(abs(contributions_long$contribution))),
+      oob = scales::squish,
+      na.value = "white"
     ) +
     theme_minimal() +
     theme(
@@ -270,24 +287,98 @@ plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, d
     ) +
     scale_x_discrete(expand = c(0, 0)) +
     scale_y_discrete(expand = c(0, 0))
-
-  # Calculate dimensions
-  n_clusters <- length(unique(contributions_long$cluster))
-  n_genes <- length(unique(contributions_long$gene))
   
-  # Calculate dimensions to ensure proper tile height
-  width <- min(25, max(15, n_clusters * 0.4))
-  height <- min(120, max(60, n_genes * 0.3))  # Increased height significantly
-  
-  # Add aspect ratio directly in ggsave
+  # Save plot with existing dimensions
   ggsave(
     file.path(figures_dir, dataset_name, version,
               paste0("feature_heatmap_", kernel_type, "_", dataset_name, "_", version, ".png")),
     plot = p,
-    width = width,
-    height = height,
+    width = min(25, max(15, length(all_clusters) * 0.4)),
+    height = min(120, max(60, length(all_genes) * 0.3)),
     dpi = 400,
     limitsize = FALSE
+  )
+}
+
+plot_total_contributions <- function(abs_feature_contributions_path, dataset_name, version, kernel_type) {
+  # Read and process data
+  contributions_df <- fread(abs_feature_contributions_path)
+  
+  # Transform to long format and decompose feature names
+  contributions_long <- contributions_df %>%
+    gather(key = "feature", value = "contribution") %>%
+    separate(feature, into = c("gene", "cluster_name", "cluster_number"), sep = "\\|") %>%
+    mutate(
+      cluster = paste(cluster_name, cluster_number),
+      contribution = ifelse(is.na(contribution), 0, abs(as.numeric(contribution)))
+    )
+  
+  # Calculate total contributions per cluster
+  cluster_totals <- contributions_long %>%
+    group_by(cluster) %>%
+    summarize(total_contribution = sum(contribution)) %>%
+    arrange(desc(total_contribution))  # Removed head(50) to show all clusters
+  
+  # Plot cluster contributions
+  p_cluster <- ggplot(cluster_totals, 
+                     aes(x = reorder(cluster, total_contribution), 
+                         y = total_contribution)) +
+    geom_bar(stat = "identity", fill = "skyblue") +
+    coord_flip() +
+    labs(
+      title = paste("Top 50 Clusters by Total Absolute Contribution -", 
+                   dataset_name, "-", version, "-", kernel_type),
+      x = "Cluster",
+      y = "Total Absolute Contribution"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.y = element_text(size = 8),
+      plot.margin = margin(t = 5, r = 20, b = 10, l = 100)
+    )
+  
+  # Calculate total contributions per gene
+  gene_totals <- contributions_long %>%
+    group_by(gene) %>%
+    summarize(total_contribution = sum(contribution)) %>%
+    arrange(desc(total_contribution)) %>%
+    head(50)  # Top 50 genes
+  
+  # Plot gene contributions
+  p_gene <- ggplot(gene_totals, 
+                   aes(x = reorder(gene, total_contribution), 
+                       y = total_contribution)) +
+    geom_bar(stat = "identity", fill = "coral") +
+    coord_flip() +
+    labs(
+      title = paste("Top 50 Genes by Total Absolute Contribution -", 
+                   dataset_name, "-", version, "-", kernel_type),
+      x = "Gene",
+      y = "Total Absolute Contribution"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.y = element_text(size = 8),
+      plot.margin = margin(t = 5, r = 20, b = 10, l = 100)
+    )
+  
+  # Save plots
+  ggsave(
+    file.path(figures_dir, dataset_name, version,
+              paste0("total_cluster_contributions_", kernel_type, "_", dataset_name, "_", version, ".png")),
+    plot = p_cluster,
+    width = 12,
+    height = 10,
+    dpi = 300
+  )
+  
+  ggsave(
+    file.path(figures_dir, dataset_name, version,
+              paste0("total_gene_contributions_", kernel_type, "_", dataset_name, "_", version, ".png")),
+    plot = p_gene,
+    width = 12,
+    height = 10,
+    dpi = 300
   )
 }
 
@@ -417,6 +508,25 @@ for (dataset_name in names(datasets)) {
     
     print("Plotting feature contributions heatmap for RBF kernel...")
     plot_feature_contributions_heatmap(
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, 
+             "/absolute_feature_contributions_rbf_", dataset_name, "_", version, ".csv"),
+      dataset_name,
+      version,
+      "rbf"
+    )
+    
+    # Add total contributions plotting for both kernels
+    print("Plotting total contributions for linear kernel...")
+    plot_total_contributions(
+      paste0(intermediates_dir, "/svm/", dataset_name, "/", version, 
+             "/absolute_feature_contributions_linear_", dataset_name, "_", version, ".csv"),
+      dataset_name,
+      version,
+      "linear"
+    )
+    
+    print("Plotting total contributions for RBF kernel...")
+    plot_total_contributions(
       paste0(intermediates_dir, "/svm/", dataset_name, "/", version, 
              "/absolute_feature_contributions_rbf_", dataset_name, "_", version, ".csv"),
       dataset_name,
