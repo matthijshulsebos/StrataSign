@@ -272,11 +272,11 @@ for (dataset_name in names(datasets)) {
     
     # Calculate regular feature contributions (with possible cancellations)
     original_feature_contributions_rbf <- as.data.frame(t(pca_loadings_rbf %*% as.matrix(shap_values_rbf)))
-    colnames(original_feature_contributions_rbf) <- colnames(X_train)
+    colnames(original_feature_contributions_rbf) <- colnames(X_train)  # Already in gene@cluster format
     
     # Calculate absolute feature contributions (no cancellation)
     abs_feature_contributions_rbf <- as.data.frame(t(abs(pca_loadings_rbf) %*% abs(as.matrix(shap_values_rbf))))
-    colnames(abs_feature_contributions_rbf) <- colnames(X_train)
+    colnames(abs_feature_contributions_rbf) <- colnames(X_train)  # Already in gene@cluster format
     
     # Save both types of feature contributions for RBF kernel
     write_csv(original_feature_contributions_rbf, 

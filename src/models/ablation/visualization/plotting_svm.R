@@ -42,7 +42,7 @@ plot_top_genes_per_cluster <- function(original_feature_contributions_path, data
   # Extract cluster name from feature names
   original_feature_contributions <- original_feature_contributions %>%
     gather(key = "Feature", value = "Contribution") %>%
-    mutate(ClusterName = sub(".*\\|(.*)\\|.*$", "\\1", Feature))
+    mutate(ClusterName = sub(".*@(.*)", "\\1", Feature))
   
   # Sanitize cluster names for file paths
   original_feature_contributions$ClusterName <- gsub("/", "_", original_feature_contributions$ClusterName)
@@ -214,9 +214,8 @@ plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, d
   # Transform to long format and decompose feature names
   contributions_long <- contributions_df %>%
     gather(key = "feature", value = "contribution") %>%
-    separate(feature, into = c("gene", "cluster_name", "cluster_number"), sep = "\\|") %>%
+    separate(feature, into = c("gene", "cluster"), sep = "@") %>%
     mutate(
-      cluster = paste(cluster_name, cluster_number),
       contribution = as.numeric(contribution),
       contribution = ifelse(is.na(contribution) | is.nan(contribution), 0, contribution * 1000)
     ) %>%

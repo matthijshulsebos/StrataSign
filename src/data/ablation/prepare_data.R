@@ -53,9 +53,13 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   # Convert cluster numbers to sublineage or lineage names
   counts_long <- counts_long %>%
     left_join(annots_list, by = c("cluster" = "cluster")) %>%
-    mutate(cluster_name = ifelse(!is.na(sub_lineage), sub_lineage, lineage)) %>%
-    mutate(cluster_name = gsub("/", "-", cluster_name)) %>%  # Sanitize cluster names
-    mutate(gene_cluster = paste(gene, cluster_name, cluster, sep = "|"))
+    mutate(
+      cluster_name = ifelse(!is.na(sub_lineage), sub_lineage, lineage),
+      cluster_name = gsub("/", "-", cluster_name),  # Sanitize cluster names
+      cluster = paste(cluster_name, cluster, sep = "_"),  # Create cluster identifier
+      gene_cluster = paste(gene, cluster, sep = "@")  # Create feature name
+    ) %>%
+    select(sample_ID, gene_cluster, count)  # Keep only necessary columns
 
   # Ensure count column is numeric
   counts_long$count <- as.numeric(counts_long$count)
@@ -195,9 +199,13 @@ preprocess_counts_random_genes <- function(cluster_subset, subset_name, random_v
   # Convert cluster numbers to sublineage or lineage names
   counts_long <- counts_long %>%
     left_join(annots_list, by = c("cluster" = "cluster")) %>%
-    mutate(cluster_name = ifelse(!is.na(sub_lineage), sub_lineage, lineage)) %>%
-    mutate(cluster_name = gsub("/", "-", cluster_name)) %>%  # Sanitize cluster names
-    mutate(gene_cluster = paste(gene, cluster_name, cluster, sep = "|"))
+    mutate(
+      cluster_name = ifelse(!is.na(sub_lineage), sub_lineage, lineage),
+      cluster_name = gsub("/", "-", cluster_name),  # Sanitize cluster names
+      cluster = paste(cluster_name, cluster, sep = "_"),  # Create cluster identifier
+      gene_cluster = paste(gene, cluster, sep = "@")  # Create feature name
+    ) %>%
+    select(sample_ID, gene_cluster, count)  # Keep only necessary columns
 
   # Ensure count column is numeric
   counts_long$count <- as.numeric(counts_long$count)

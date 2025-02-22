@@ -127,12 +127,15 @@ for (dataset_name in names(datasets)) {
       Feature = rownames(coef_matrix),
       Coefficient = coef_matrix[,1]
     ) %>%
-      arrange(desc(abs(Coefficient))) %>%
       filter(Feature != "(Intercept)") %>%
       mutate(
         Abs_Coefficient = abs(Coefficient),
-        Direction = ifelse(Coefficient > 0, "Positive", "Negative")
-      )
+        Direction = ifelse(Coefficient > 0, "Positive", "Negative"),
+        # Split feature name into components if needed
+        Gene = sapply(strsplit(Feature, "@"), `[`, 1),
+        Cluster = sapply(strsplit(Feature, "@"), `[`, 2)
+      ) %>%
+      arrange(desc(abs(Coefficient)))
     
     # Save feature importance with detailed information
     write_csv(feature_importance, 
