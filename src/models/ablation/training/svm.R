@@ -181,6 +181,30 @@ for (dataset_name in names(datasets)) {
               paste0(intermediates_dir, "/", dataset_name, "/", version, 
                      "/absolute_feature_contributions_linear_", dataset_name, "_", version, ".csv"))
 
+    # Define heatplot intermediates directory
+    heatplot_dir <- "data/ablation/intermediates/heatplot"
+    dir.create(paste0(heatplot_dir, "/", dataset_name, "/", version), recursive = TRUE, showWarnings = FALSE)
+
+    # Save feature contributions in both original and heatplot directories
+    # For linear kernel
+    write_csv(
+      tibble(
+        Feature = colnames(original_feature_contributions_linear),
+        Value = as.numeric(original_feature_contributions_linear[1,])
+      ),
+      paste0(heatplot_dir, "/", dataset_name, "/", version, 
+             "/original_feature_contributions_linear_", dataset_name, "_", version, ".csv")
+    )
+    
+    write_csv(
+      tibble(
+        Feature = colnames(abs_feature_contributions_linear),
+        Value = as.numeric(abs_feature_contributions_linear[1,])
+      ),
+      paste0(heatplot_dir, "/", dataset_name, "/", version, 
+             "/absolute_feature_contributions_linear_", dataset_name, "_", version, ".csv")
+    )
+
     # Train SVM model with RBF kernel
     print("Training SVM model with RBF kernel...")
     svm_model_rbf <- svm(X_train_pca_rbf, y_train$x, kernel = "radial", probability = TRUE)
@@ -285,6 +309,26 @@ for (dataset_name in names(datasets)) {
     write_csv(abs_feature_contributions_rbf, 
               paste0(intermediates_dir, "/", dataset_name, "/", version, 
                      "/absolute_feature_contributions_rbf_", dataset_name, "_", version, ".csv"))
+
+    # Save feature contributions in both original and heatplot directories
+    # For RBF kernel
+    write_csv(
+      tibble(
+        Feature = colnames(original_feature_contributions_rbf),
+        Value = as.numeric(original_feature_contributions_rbf[1,])
+      ),
+      paste0(heatplot_dir, "/", dataset_name, "/", version, 
+             "/original_feature_contributions_rbf_", dataset_name, "_", version, ".csv")
+    )
+    
+    write_csv(
+      tibble(
+        Feature = colnames(abs_feature_contributions_rbf),
+        Value = as.numeric(abs_feature_contributions_rbf[1,])
+      ),
+      paste0(heatplot_dir, "/", dataset_name, "/", version, 
+             "/absolute_feature_contributions_rbf_", dataset_name, "_", version, ".csv")
+    )
 
     # Save SHAP values for plotting in the intermediates directory instead of models
     saveRDS(shapley_linear, paste0(intermediates_dir, "/", dataset_name, "/", version, "/shapley_linear_", dataset_name, "_", version, ".rds"))

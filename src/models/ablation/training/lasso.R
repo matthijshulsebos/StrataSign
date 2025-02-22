@@ -121,6 +121,10 @@ for (dataset_name in names(datasets)) {
               F1_score = f1_score,
               ROC_AUC = roc_auc)
     
+    # Define heatplot intermediates directory
+    heatplot_dir <- "data/ablation/intermediates/heatplot"
+    dir.create(paste0(heatplot_dir, "/", dataset_name, "/", version), recursive = TRUE, showWarnings = FALSE)
+    
     # Get feature importance (coefficients)
     coef_matrix <- as.matrix(coef(cv_fit, s = "lambda.min"))
     feature_importance <- data.frame(
@@ -131,16 +135,34 @@ for (dataset_name in names(datasets)) {
       mutate(
         Abs_Coefficient = abs(Coefficient),
         Direction = ifelse(Coefficient > 0, "Positive", "Negative"),
-        # Split feature name into components if needed
         Gene = sapply(strsplit(Feature, "@"), `[`, 1),
         Cluster = sapply(strsplit(Feature, "@"), `[`, 2)
       ) %>%
       arrange(desc(abs(Coefficient)))
     
-    # Save feature importance with detailed information
+    # Save feature importance in both directories
+    # Original location
     write_csv(feature_importance, 
               paste0(intermediates_dir, "/", dataset_name, "/", version, 
                      "/feature_importance_", dataset_name, "_", version, ".csv"))
+    
+    # Heatplot location
+    write_csv(
+      feature_importance %>% 
+        select(Feature, Coefficient) %>%
+        rename(Value = Coefficient),
+      paste0(heatplot_dir, "/", dataset_name, "/", version, 
+             "/lasso_coefficients_", dataset_name, "_", version, ".csv")
+    )
+    
+    # Also save absolute coefficients
+    write_csv(
+      feature_importance %>% 
+        select(Feature, Abs_Coefficient) %>%
+        rename(Value = Abs_Coefficient),
+      paste0(heatplot_dir, "/", dataset_name, "/", version, 
+             "/lasso_absolute_coefficients_", dataset_name, "_", version, ".csv")
+    )
     
     # Save non-zero features separately (selected by LASSO)
     selected_features <- feature_importance %>%
