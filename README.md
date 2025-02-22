@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="stratasign.png" alt="StrataSign Overview" width="800"/>
+</p>
+
 # Extended Analysis of Leader et al.
 
 This repository contains an extended analysis of the Leader et al. study, focusing on machine learning approaches to analyze metabolic gene expression patterns in tumor samples.
@@ -5,34 +9,56 @@ This repository contains an extended analysis of the Leader et al. study, focusi
 ## Repository Structure
 
 ```
-IMM/
-├── original/           # Original repository content from Leader et al.
-│   ├── data/          # Original datasets
-│   ├── input_tables/  # Supporting tables
-│   └── output/        # Original analysis output
-├── src/               # Extended analysis code
-│   ├── scripts/       # Analysis scripts
-│   │   ├── DE/       # Differential expression analysis
-│   │   ├── PE/       # Pathway enrichment analysis
-│   │   ├── kegg/     # KEGG metabolic gene extraction
-│   │   ├── modeling/ # Machine learning models
-│   │   ├── preprocessing/ # Data transformation scripts
-│   │   └── utils/    # General utility functions
-│   └── output/       # Output from extended analysis
-└── README.md         # This file
+StrataSign/
+├── base/                  # Original repository from Leader et al.
+│   ├── data/             # Sequencing data
+│   ├── input_tables/     # Cluster annotations and metadata
+│   ├── intermediates/    # Intermediate files
+│   ├── output/           # Paper figures
+│   └── scripts/          # Reproduction code
+│
+├── data/                 # Extended data processing
+│   ├── ablation/         # Machine learning ablation study
+│   ├── bulk_rna/         # Pseudobulk processed data
+│   ├── kegg/            # Metabolic genes and pathways
+│   ├── lcam/            # LCAM score calculations
+│   ├── temp/            # Temporary files
+│   └── validation/      # Data reconstruction validation
+│
+├── results/             # Analysis outputs
+│   ├── ablation/        # Ablation study results
+│   │   ├── figures/     # Visualizations
+│   │   ├── models/      # Trained models
+│   │   └── summary/     # Performance metrics
+│   ├── analysis/        # DE and pathway enrichment
+│   ├── archive/         # Archived analyses
+│   └── validation/      # LCAM distributions etc.
+│
+├── setup/               # Setup scripts
+│   └── install.R        # Package installation
+│
+├── src/                 # Source code (R)
+│   ├── analysis/        # DE and PE analysis
+│   ├── data/           # Data preprocessing
+│   ├── models/         # Model training/evaluation
+│   └── utils/          # Utility functions
+│
+└── README.md            # This file
 ```
 
-## Extended Analysis
+## Project Components
 
-The extended analysis in this repository focuses on:
-- Preprocessing of bulk and single-cell RNA sequencing data
-- Machine learning models to analyze metabolic gene patterns
-- Feature importance analysis using SHAP values
-- Comparative analysis across different sample groups
+### Base Repository
+Contains the original Leader et al. study materials, including sequencing data, cluster annotations, and reproduction code.
 
-## Original Study
+This work extends the analysis from Leader et al. ([PMC8728963](https://pmc.ncbi.nlm.nih.gov/articles/PMC8728963/)).
 
-This work extends the analysis from Leader et al. (https://pmc.ncbi.nlm.nih.gov/articles/PMC8728963/).
+## Setup
+
+To install required packages:
+```R
+source("setup/install.R")
+```
 
 ## Author
 
