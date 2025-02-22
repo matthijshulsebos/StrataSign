@@ -218,12 +218,11 @@ plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, d
     mutate(
       cluster = paste(cluster_name, cluster_number),
       contribution = as.numeric(contribution),
-      # Replace NAs and scale contributions
-      contribution = ifelse(is.na(contribution), 0, contribution * 1000)
+      contribution = ifelse(is.na(contribution) | is.nan(contribution), 0, contribution * 1000)
     ) %>%
     select(gene, cluster, contribution)
   
-  # Create complete gene x cluster grid to ensure no missing combinations
+  # Create complete gene x cluster grid
   all_genes <- unique(contributions_long$gene)
   all_clusters <- unique(contributions_long$cluster)
   complete_grid <- expand.grid(
@@ -234,7 +233,7 @@ plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, d
   
   # Join with actual data, filling missing combinations with 0
   contributions_long <- left_join(complete_grid, contributions_long, by = c("gene", "cluster")) %>%
-    mutate(contribution = ifelse(is.na(contribution), 0, contribution))
+    mutate(contribution = ifelse(is.na(contribution) | is.nan(contribution), 0, contribution))
   
   # Sort by total contribution
   gene_importance <- contributions_long %>%
@@ -247,7 +246,7 @@ plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, d
     summarize(total_impact = sum(abs(contribution))) %>%
     arrange(desc(total_impact))
   
-  # Create heatmap with modified color scaling
+  # Create heatmap
   p <- ggplot(contributions_long, 
              aes(x = factor(cluster, levels = cluster_importance$cluster),
                  y = factor(gene, levels = rev(gene_importance$gene)),
@@ -259,7 +258,6 @@ plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, d
       high = "red",
       midpoint = 0,
       name = "Contribution\n(×1000)",
-      # Symmetric limits around zero
       limits = c(-max(abs(contributions_long$contribution)), 
                 max(abs(contributions_long$contribution))),
       oob = scales::squish,
@@ -288,16 +286,17 @@ plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, d
     scale_x_discrete(expand = c(0, 0)) +
     scale_y_discrete(expand = c(0, 0))
   
-  # Save plot with existing dimensions
-  ggsave(
-    file.path(figures_dir, dataset_name, version,
-              paste0("feature_heatmap_", kernel_type, "_", dataset_name, "_", version, ".png")),
-    plot = p,
-    width = min(25, max(15, length(all_clusters) * 0.4)),
-    height = min(120, max(60, length(all_genes) * 0.3)),
-    dpi = 400,
-    limitsize = FALSE
-  )
+  # Save plot
+  output_path <- file.path(figures_dir, dataset_name, version,
+                          paste0("feature_heatmap_", kernel_type, "_", dataset_name, "_", version, ".png"))
+  print(paste("Saving feature contributions heatmap to:", output_path))
+  
+  ggsave(output_path,
+         plot = p,
+         width = min(25, max(15, length(all_clusters) * 0.4)),
+         height = min(120, max(60, length(all_genes) * 0.3)),
+         dpi = 400,
+         limitsize = FALSE)
 }
 
 plot_total_contributions <- function(abs_feature_contributions_path, dataset_name, version, kernel_type) {

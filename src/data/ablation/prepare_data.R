@@ -60,12 +60,20 @@ preprocess_counts <- function(cluster_subset, subset_name) {
   # Ensure count column is numeric
   counts_long$count <- as.numeric(counts_long$count)
 
-  # Normalize counts per sample using CP10K
+  # Calculate mean sample size
+  mean_sample_size <- counts_long %>%
+    group_by(sample_ID) %>%
+    summarize(sample_size = sum(count)) %>%
+    ungroup() %>%
+    summarize(mean_size = mean(sample_size)) %>%
+    pull(mean_size)
+
+  # Normalize counts using mean sample size
   counts_long <- counts_long %>%
     group_by(sample_ID) %>%
     mutate(total_counts = sum(count)) %>%
     ungroup() %>%
-    mutate(normalized_count = (count / total_counts) * 10000)
+    mutate(normalized_count = (count / total_counts) * mean_sample_size)
 
   # Apply log transformation
   counts_long <- counts_long %>%
@@ -194,12 +202,20 @@ preprocess_counts_random_genes <- function(cluster_subset, subset_name, random_v
   # Ensure count column is numeric
   counts_long$count <- as.numeric(counts_long$count)
 
-  # Normalize counts per sample using CP10K
+  # Calculate mean sample size
+  mean_sample_size <- counts_long %>%
+    group_by(sample_ID) %>%
+    summarize(sample_size = sum(count)) %>%
+    ungroup() %>%
+    summarize(mean_size = mean(sample_size)) %>%
+    pull(mean_size)
+
+  # Normalize counts using mean sample size
   counts_long <- counts_long %>%
     group_by(sample_ID) %>%
     mutate(total_counts = sum(count)) %>%
     ungroup() %>%
-    mutate(normalized_count = (count / total_counts) * 10000)
+    mutate(normalized_count = (count / total_counts) * mean_sample_size)
 
   # Apply log transformation
   counts_long <- counts_long %>%

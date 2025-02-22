@@ -192,16 +192,56 @@ for (dataset_name in names(datasets)) {
     y_pred_rbf <- predict(svm_model_rbf, X_test_pca_rbf, probability = TRUE)
     y_prob_rbf <- attr(y_pred_rbf, "probabilities")[,2]
 
-    # Save predictions and true labels for RBF kernel
-    write_csv(data.frame(y_test = y_test$x, y_pred = y_pred_rbf), paste0(intermediates_dir, "/", dataset_name, "/", version, "/predictions_rbf_", dataset_name, "_", version, ".csv"))
+    # Save raw predictions before factor conversion
+    write_csv(data.frame(y_test = y_test$x, y_pred = y_pred_rbf), 
+             paste0(intermediates_dir, "/", dataset_name, "/", version, 
+                    "/predictions_rbf_", dataset_name, "_", version, ".csv"))
 
-    # Calculate performance metrics for RBF kernel
-    confusion_rbf <- confusionMatrix(y_pred_rbf, y_test$x)
+    # First, properly encode the raw predictions
+    y_pred_rbf <- as.numeric(as.character(y_pred_rbf))  # Convert to numeric first
+    y_test_raw <- as.numeric(as.character(y_test$x))    # Get raw test values
+    
+    # Then create factors with consistent levels
+    y_pred_factor <- factor(y_pred_rbf, levels = c(0, 1), labels = c("Normal", "Tumor"))
+    y_test_factor <- factor(y_test_raw, levels = c(0, 1), labels = c("Normal", "Tumor"))
+    
+    # Add debug prints
+    print("\nRaw value distributions:")
+    print("Raw predictions:")
+    print(table(y_pred_rbf))
+    print("Raw test values:")
+    print(table(y_test_raw))
+    
+    print("\nFactor distributions:")
+    print("Predicted factors:")
+    print(table(y_pred_factor))
+    print("Test factors:")
+    print(table(y_test_factor))
+    
+    # Calculate confusion matrix with explicit positive class
+    confusion_rbf <- confusionMatrix(y_pred_factor, y_test_factor, positive = "Tumor")
+    
+    print("\nConfusion Matrix:")
+    print(confusion_rbf$table)
+    print("\nDetailed Statistics:")
+    print(confusion_rbf$byClass)
+    
+    # Calculate metrics ensuring no NA values
     accuracy_rbf <- confusion_rbf$overall["Accuracy"]
-    precision_rbf <- confusion_rbf$byClass["Pos Pred Value"]
-    recall_rbf <- confusion_rbf$byClass["Sensitivity"]
-    f1_score_rbf <- 2 * (precision_rbf * recall_rbf) / (precision_rbf + recall_rbf)
-    roc_auc_rbf <- as.numeric(roc(y_test$x, y_prob_rbf)$auc)
+    precision_rbf <- ifelse(is.na(confusion_rbf$byClass["Pos Pred Value"]), 0, 
+                           confusion_rbf$byClass["Pos Pred Value"])
+    recall_rbf <- ifelse(is.na(confusion_rbf$byClass["Sensitivity"]), 0, 
+                        confusion_rbf$byClass["Sensitivity"])
+    
+    # Calculate F1 score safely
+    if (precision_rbf == 0 && recall_rbf == 0) {
+        f1_score_rbf <- 0
+    } else {
+        f1_score_rbf <- 2 * (precision_rbf * recall_rbf) / (precision_rbf + recall_rbf)
+    }
+    
+    # Calculate ROC AUC
+    roc_auc_rbf <- as.numeric(roc(y_test_factor == "Tumor", y_prob_rbf)$auc)
 
     # Store performance metrics for RBF kernel
     performance_summary <- performance_summary %>% 
