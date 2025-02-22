@@ -1,3 +1,0 @@
-category,subcategory,ID,Description,GeneRatio,BgRatio,RichFactor,FoldEnrichment,zScore,pvalue,p.adjust,qvalue,geneID,Count
-Human Diseases,Substance dependence,hsa05032,Morphine addiction,2/6,25/1700,0.08,22.666666666666668,6.493372422212221,0.0030050970114520246,0.0422549442074751,0.03934670918104969,5140/5141,2
-Environmental Information Processing,Signal transduction,hsa04024,cAMP signaling pathway,2/6,26/1700,0.07692307692307693,21.794871794871796,6.3574185673145465,0.003250380323651931,0.0422549442074751,0.03934670918104969,5140/5141,2

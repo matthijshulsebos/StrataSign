@@ -1,0 +1,75 @@
+# Base repository content - ignore output and data
+base/data/**
+base/output/**
+!base/data/.gitkeep
+!base/output/.gitkeep
+
+# Data directories
+data/**
+data/intermediates/**
+!data/.gitkeep
+!data/**/README.md
+
+# Results directories
+results/**
+!results/.gitkeep
+!results/**/README.md
+
+# Original repository content
+original/
+
+# VS Code specific files
+.vscode/
+*.code-workspace
+.history/
+.settings/
+
+# Output directories
+src/**/output/
+src/output/
+src/modeling/**/output/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+ENV/
+env/
+.env/
+
+# R
+.Rhistory 
+.RData
+.RDataTmp
+.Rproj.user/
+*.Rproj
+.Rdata
+.httr-oauths
+*_cache/
+/cache/
+
+# Common data formats
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.rds
+*.RDS
+*.rda
+*.RDA
+
+# Image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.ico
+
+# OS specific
+.DS_Store
+Thumbs.db
