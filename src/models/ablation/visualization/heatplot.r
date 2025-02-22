@@ -55,7 +55,7 @@ calculate_robust_distance <- function(x, method = "pearson") {
       if(is.na(cos_sim)) cos_sim <- 0
       
       # Calculate magnitude similarity
-      mag_ratio <- min(sum(abs(vec1)), sum(abs(vec2))) / max(sum(abs(vec1)), sum(abs(vec1)), sum(abs(vec2)))
+      mag_ratio <- min(sum(abs(vec1)), sum(abs(vec2))) / max(sum(abs(vec1)), sum(abs(vec2)))
       if(is.na(mag_ratio)) mag_ratio <- 0
       
       # Combine both metrics
