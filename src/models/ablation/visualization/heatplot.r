@@ -1,109 +1,31 @@
-# Required packages
-library(ggplot2)
+# Required packages (tidyverse removed as we only need dplyr and tidyr)
 library(dplyr)
 library(tidyr)
 library(data.table)
-library(ggdendro)    # Add this
-library(grid)
-library(gridExtra)   # Add this
-library(tidyverse)
-library(fs)          # Add this
+library(fs)          
 library(ComplexHeatmap)
 library(circlize)  # for color scales
+library(cluster)  # for silhouette analysis
 
-#' Calculate similarity matrix
-#' @param data Matrix of values
-#' @param method Correlation method ("pearson", "spearman", "kendall")
-#' @return Similarity matrix
-calculate_similarity_matrix <- function(data, method = "pearson") {
-  # Check if any rows or columns have zero variance
-  row_vars <- apply(data, 1, var, na.rm = TRUE)
-  col_vars <- apply(data, 2, var, na.rm = TRUE)
-  
-  if (any(row_vars == 0) || any(col_vars == 0)) {
-    # Add small amount of noise to zero-variance features
-    data <- data + matrix(rnorm(nrow(data) * ncol(data), 0, 1e-10), 
-                         nrow = nrow(data))
-  }
-  
-  cor_matrix <- cor(data, method = method)
-  # Handle NA values in correlation matrix
-  cor_matrix[is.na(cor_matrix)] <- 0
-  # Convert correlations to distances (1 - correlation)
-  dist_matrix <- as.dist(1 - cor_matrix)
-  return(dist_matrix)
-}
-
-#' Calculate robust distance matrix
+#' Calculate distance matrix using scaled Euclidean distance
 #' @param x Input matrix
-#' @param method Correlation method
+#' @param scale_rows Whether to scale rows before distance calculation
 #' @return Distance matrix
-calculate_robust_distance <- function(x, method = "pearson") {
+calculate_robust_distance <- function(x, scale_rows = FALSE) {  
   x <- as.matrix(x)
-  n <- ncol(x)
-  dist_matrix <- matrix(0, n, n)
   
-  # Calculate pairwise distances directly
-  for(i in 1:n) {
-    for(j in i:n) {
-      # Get vectors
-      vec1 <- x[,i]
-      vec2 <- x[,j]
-      
-      # Calculate cosine similarity
-      cos_sim <- sum(vec1 * vec2) / (sqrt(sum(vec1^2)) * sqrt(sum(vec2^2)))
-      if(is.na(cos_sim)) cos_sim <- 0
-      
-      # Calculate magnitude similarity
-      mag_ratio <- min(sum(abs(vec1)), sum(abs(vec2))) / max(sum(abs(vec1)), sum(abs(vec2)))
-      if(is.na(mag_ratio)) mag_ratio <- 0
-      
-      # Combine both metrics
-      similarity <- (cos_sim + 1)/2 * mag_ratio
-      dist_matrix[i,j] <- dist_matrix[j,i] <- 1 - similarity
-    }
+  if(scale_rows) {
+    row_sums <- rowSums(abs(x))
+    x <- x / ifelse(row_sums > 0, row_sums, 1)
   }
   
-  return(as.dist(dist_matrix))
-}
-
-#' Perform hierarchical clustering
-#' @param dist_matrix Distance matrix
-#' @param method Clustering method
-#' @return Hierarchical clustering object
-perform_clustering <- function(dist_matrix, method = "complete") {
-  hclust(dist_matrix, method = method)
-}
-
-#' Create dendrogram plot
-#' @param hclust_obj Hierarchical clustering object
-#' @param direction Direction of the dendrogram ("horizontal" or "vertical")
-#' @return ggplot object
-create_dendrogram <- function(hclust_obj, direction = "horizontal") {
-  dendro_data <- dendro_data(hclust_obj)
-  
-  if(direction == "horizontal") {
-    p <- ggplot() +
-      geom_segment(data = segment(dendro_data),
-                  aes(x = -y, y = x, xend = -yend, yend = xend)) + # Flip direction
-      scale_x_reverse() +  # Reverse scale to point towards heatmap
-      coord_cartesian(expand = FALSE) +  # Remove padding
-      theme_void()
-  } else {
-    p <- ggplot() +
-      geom_segment(data = segment(dendro_data),
-                  aes(x = x, y = y, xend = xend, yend = yend)) +
-      coord_cartesian(expand = FALSE) +  # Remove padding
-      theme_void()
-  }
-  return(p)
+  return(dist(t(x), method = "euclidean"))
 }
 
 #' Prepare data for heatmap plotting
 #' @param data_path Path to input data file
 #' @param n_top_genes Number of top genes to display
-#' @return List containing processed data and top gene information
-#' @export
+#' @return Matrix containing processed data
 prepare_heatmap_data <- function(data_path, n_top_genes = 50) {
   # Read data with explicit column types
   data_df <- fread(data_path, colClasses = c("Feature" = "character", "Value" = "numeric"))
@@ -115,7 +37,7 @@ prepare_heatmap_data <- function(data_path, n_top_genes = 50) {
       cluster = sapply(strsplit(Feature, "@"), `[`, 2),
       value = as.numeric(Value)
     ) %>% 
-    filter(!is.na(cluster)) %>%
+    filter(!is.na(cluster)) %>% 
     select(gene, cluster, value)
   
   # Select top n genes by absolute value
@@ -134,46 +56,91 @@ prepare_heatmap_data <- function(data_path, n_top_genes = 50) {
       names_from = cluster,
       values_from = value,
       values_fill = 0
-    ) %>%
+    ) %>% 
     column_to_rownames("gene")
   
-  return(list(
-    data_matrix = as.matrix(data_matrix)
-  ))
+  return(as.matrix(data_matrix))  # Simplified return
 }
 
-#' Find natural cluster breaks using dendrogram height
-#' @param hc Hierarchical clustering object
-#' @return Number of natural clusters
-find_natural_clusters <- function(hc, min_height_ratio = 1.25) {  # Lowered from 1.5
-  # Get dendrogram heights
-  heights <- sort(hc$height, decreasing = TRUE)
-  
-  # Calculate height ratios between successive levels
-  height_ratios <- heights[-length(heights)] / heights[-1]
-  
-  # Find all significant breaks (where ratio exceeds threshold)
-  significant_breaks <- which(height_ratios > min_height_ratio)
-  
-  if(length(significant_breaks) > 0) {
-    # Use number of breaks + 1 for more granular clustering
-    n_clusters <- length(significant_breaks) + 1
-  } else {
-    # Default to 3 clusters if no clear breaks
-    n_clusters <- 3
+#' Find optimal number of clusters using silhouette analysis
+#' @param dist_matrix Distance matrix
+#' @param max_k Maximum number of clusters to try
+#' @param min_sil_score Minimum silhouette score to consider clustering valid
+#' @return Optimal number of clusters (1 if no clear clusters)
+find_optimal_clusters <- function(dist_matrix, max_k = 8, min_sil_score = 0.15) {  # Lowered threshold
+  # Convert distance matrix to regular matrix if needed
+  if(class(dist_matrix)[1] == "dist") {
+    dist_matrix <- as.matrix(dist_matrix)
   }
   
-  # Cap at higher maximum
-  return(min(n_clusters, 8))  # Increased from 5
+  # Check if we have enough data points for clustering
+  n <- nrow(dist_matrix)
+  if(n < 3) {
+    cat("Warning: Too few items to cluster meaningfully\n")
+    return(1)  # No split
+  }
+  
+  # Adjust max_k if necessary
+  max_k <- min(max_k, n-1)
+  
+  # Try different numbers of clusters
+  sil_widths <- numeric(max_k - 1)
+  for(k in 2:max_k) {
+    tryCatch({
+      # Perform hierarchical clustering
+      hc <- hclust(as.dist(dist_matrix), method = "ward.D2")
+      clusters <- cutree(hc, k = k)
+      
+      # Check if we have enough samples in each cluster
+      if(any(table(clusters) < 2)) {
+        cat(sprintf("Warning: k=%d produces singleton clusters, skipping\n", k))
+        sil_widths[k-1] <- -1
+        next
+      }
+      
+      # Calculate silhouette width
+      sil <- silhouette(clusters, dist_matrix)
+      sil_widths[k-1] <- mean(sil[, "sil_width"])
+    }, error = function(e) {
+      cat(sprintf("Warning: Failed for k=%d: %s\n", k, e$message))
+      sil_widths[k-1] <- -1
+    })
+  }
+  
+  # Print silhouette analysis results
+  cat(sprintf("Silhouette analysis results:\n"))
+  for(k in 2:max_k) {
+    if(sil_widths[k-1] >= 0) {
+      cat(sprintf("k=%d: %.3f\n", k, sil_widths[k-1]))
+    } else {
+      cat(sprintf("k=%d: failed\n", k))
+    }
+  }
+  
+  # Find best k among valid calculations
+  valid_k <- which(sil_widths >= 0)
+  if(length(valid_k) > 0) {
+    best_score <- max(sil_widths[valid_k])
+    if(best_score >= min_sil_score) {
+      optimal_k <- valid_k[which.max(sil_widths[valid_k])] + 1
+      cat(sprintf("Found meaningful clusters (score: %.3f)\n", best_score))
+      return(optimal_k)
+    }
+  }
+  
+  # If no good clustering found, return 1 (no split)
+  cat("No clear clustering structure found - keeping as single group\n")
+  return(1)
 }
 
-#' Enhanced heatmap plotting function with natural clustering
-plot_enhanced_heatmap <- function(data_path, dataset_name, version, analysis_type,
-                                n_top_genes = 50, cluster_by_similarity = TRUE,
-                                similarity_method = "pearson", output_path = NULL) {
+#' Enhanced heatmap plotting function
+#' @param data_path Path to input data file
+#' @param n_top_genes Number of top genes to display
+#' @param output_path Output path for the plot
+#' @return Heatmap object
+plot_enhanced_heatmap <- function(data_path, n_top_genes = 50, output_path = NULL) {
   # Prepare data
-  prepared_data <- prepare_heatmap_data(data_path, n_top_genes)
-  data_matrix <- as.matrix(prepared_data$data_matrix)
+  data_matrix <- prepare_heatmap_data(data_path, n_top_genes)
   
   # Calculate sparsity
   sparsity <- mean(data_matrix == 0)
@@ -185,25 +152,20 @@ plot_enhanced_heatmap <- function(data_path, dataset_name, version, analysis_typ
   )
   
   # Calculate distances and clustering
-  row_dist <- calculate_robust_distance(t(data_matrix), method = similarity_method)
-  col_dist <- calculate_robust_distance(data_matrix, method = similarity_method)
+  row_dist <- calculate_robust_distance(t(data_matrix), scale_rows = FALSE)
+  col_dist <- calculate_robust_distance(data_matrix, scale_rows = TRUE)  # Scale for columns
   
   # Create hierarchical clustering
   row_hc <- hclust(row_dist, method = "ward.D2")
   col_hc <- hclust(col_dist, method = "ward.D2")
   
-  if(cluster_by_similarity) {
-    # Find natural cluster breaks from dendrogram structure
-    row_k <- find_natural_clusters(row_hc)
-    col_k <- find_natural_clusters(col_hc)
-    
-    # Debug info
-    cat(sprintf("Natural row clusters: %d (based on height differences)\n", row_k))
-    cat(sprintf("Natural column clusters: %d (based on height differences)\n", col_k))
-  } else {
-    row_k <- NULL
-    col_k <- NULL
-  }
+  # Find optimal clusters using silhouette analysis
+  row_k <- find_optimal_clusters(row_dist)
+  col_k <- find_optimal_clusters(col_dist)
+  
+  # Set splits to NULL if k=1 (no clear clusters)
+  row_split <- if(row_k > 1) row_k else NULL
+  col_split <- if(col_k > 1) col_k else NULL
   
   # Create heatmap with natural clustering
   ht <- Heatmap(data_matrix,
@@ -211,9 +173,9 @@ plot_enhanced_heatmap <- function(data_path, dataset_name, version, analysis_typ
     col = col_fun,
     cluster_rows = row_hc,
     cluster_columns = col_hc,
-    # Use natural cluster breaks from dendrogram
-    row_split = if(cluster_by_similarity) row_k else NULL,
-    column_split = if(cluster_by_similarity) col_k else NULL,
+    # Use natural cluster breaks from dendrogram only if k > 1
+    row_split = row_split,
+    column_split = col_split,
     
     # Visual parameters
     show_row_names = TRUE,
@@ -234,22 +196,16 @@ plot_enhanced_heatmap <- function(data_path, dataset_name, version, analysis_typ
   )
   
   # Adjust output dimensions to accommodate larger dendrograms
-  if(is.null(output_path)) {
-    output_path <- file.path(output_dir, dataset_name, version,
-                            paste0("heatmap_", analysis_type, ".png"))
+  if(!is.null(output_path)) {
+    png(output_path, width = 14, height = 12, units = "in", res = 300)  # Increased dimensions
+    draw(ht)
+    dev.off()
   }
-  
-  png(output_path, width = 14, height = 12, units = "in", res = 300)  # Increased dimensions
-  draw(ht)
-  dev.off()
   
   return(ht)
 }
 
 #' Create heatplots for all input files in heatplot directory
-#' @param input_dir Base directory containing heatplot input files
-#' @param output_dir Base directory for saving heatplot figures
-#' @export
 create_all_heatplots <- function(input_dir = "data/ablation/intermediates/heatplot",
                                 output_dir = "results/ablation/figures/heatplot") {
   # Get all CSV files recursively
@@ -281,12 +237,7 @@ create_all_heatplots <- function(input_dir = "data/ablation/intermediates/heatpl
     
     plot_enhanced_heatmap(
       data_path = input_file,
-      dataset_name = dataset_name,
-      version = version,
-      analysis_type = base_name,
       n_top_genes = 50,
-      cluster_by_similarity = TRUE,  # Changed to TRUE
-      similarity_method = "pearson",
       output_path = output_path
     )
   }
