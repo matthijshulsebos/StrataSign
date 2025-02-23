@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="stratasign.png" alt="StrataSign Overview" width="800"/>
+  <img src="StrataSign.png" alt="StrataSign Overview" width="800"/>
 </p>
 
 # Extended Analysis of Leader et al.
