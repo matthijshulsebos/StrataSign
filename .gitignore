@@ -70,6 +70,9 @@ env/
 *.tiff
 *.ico
 
+# But not these specific files
+!stratasign.png
+
 # OS specific
 .DS_Store
 Thumbs.db
