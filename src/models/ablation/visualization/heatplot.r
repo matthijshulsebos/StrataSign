@@ -6,6 +6,7 @@ library(fs)
 library(ComplexHeatmap)
 library(circlize)  # for color scales
 library(cluster)  # for silhouette analysis
+library(tibble)
 
 #' Calculate distance matrix using scaled Euclidean distance
 #' @param x Input matrix
@@ -212,28 +213,28 @@ create_all_heatplots <- function(input_dir = "data/ablation/intermediates/heatpl
   csv_files <- dir_ls(input_dir, recurse = TRUE, glob = "*.csv")
   
   for (input_file in csv_files) {
-    # Extract dataset and version from path
     rel_path <- path_rel(input_file, input_dir)
     parts <- path_split(rel_path)[[1]]
-    dataset_name <- parts[1]
-    version <- parts[2]
-    file_name <- parts[3]
     
-    # Extract base name without extension
+    # Debug path parsing
+    message("\nProcessing file: ", rel_path)
+    
+    # Get filename (always last part)
+    file_name <- parts[length(parts)]
     base_name <- tools::file_path_sans_ext(file_name)
     
-    # Create corresponding output directory
-    output_subdir <- file.path(output_dir, dataset_name, version)
+    # Get output directory path (preserve full directory structure)
+    output_subdir <- file.path(output_dir, dirname(rel_path))
     dir_create(output_subdir, recurse = TRUE)
     
-    # Generate unique output path using the input filename
+    # Generate unique output path
     output_path <- file.path(
       output_subdir,
       paste0("heatmap_", base_name, ".png")
     )
     
-    print(paste("Creating heatplot for:", rel_path))
-    print(paste("Saving to:", output_path))
+    message("Creating heatplot for: ", rel_path)
+    message("Saving to: ", output_path)
     
     plot_enhanced_heatmap(
       data_path = input_file,
@@ -241,8 +242,6 @@ create_all_heatplots <- function(input_dir = "data/ablation/intermediates/heatpl
       output_path = output_path
     )
   }
-  
-  print("Heatplot creation completed successfully!")
 }
 
 # Run the function
