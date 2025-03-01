@@ -129,13 +129,33 @@ for (dataset_name in names(datasets)) {
     write_csv(data.frame(y_test = y_test$x, y_pred = y_pred_linear), 
          paste0(intermediates_dir, "/", dataset_name, "/", version, "/predictions_linear_", dataset_name, "_", version, ".csv"))
 
-    # Calculate performance metrics for linear kernel
-    confusion_linear <- confusionMatrix(y_pred_linear, y_test$x)
+    # Ensure consistent handling of factor levels
+    y_pred_linear_factor <- factor(as.numeric(as.character(y_pred_linear)), 
+                                  levels = c(0, 1), 
+                                  labels = c("Normal", "Tumor"))
+    y_test_factor <- factor(as.numeric(as.character(y_test$x)), 
+                           levels = c(0, 1), 
+                           labels = c("Normal", "Tumor"))
+
+    # Calculate confusion matrix with explicit positive class
+    confusion_linear <- confusionMatrix(y_pred_linear_factor, y_test_factor, positive = "Tumor")
+
+    # Calculate metrics with safety checks
     accuracy_linear <- confusion_linear$overall["Accuracy"]
-    precision_linear <- confusion_linear$byClass["Pos Pred Value"]
-    recall_linear <- confusion_linear$byClass["Sensitivity"]
-    f1_score_linear <- 2 * (precision_linear * recall_linear) / (precision_linear + recall_linear)
-    roc_auc_linear <- as.numeric(roc(y_test$x, y_prob_linear)$auc)
+    precision_linear <- ifelse(is.na(confusion_linear$byClass["Pos Pred Value"]), 0, 
+                              confusion_linear$byClass["Pos Pred Value"])
+    recall_linear <- ifelse(is.na(confusion_linear$byClass["Sensitivity"]), 0, 
+                           confusion_linear$byClass["Sensitivity"])
+
+    # Calculate F1 score safely
+    if (precision_linear == 0 && recall_linear == 0) {
+        f1_score_linear <- 0
+    } else {
+        f1_score_linear <- 2 * (precision_linear * recall_linear) / (precision_linear + recall_linear)
+    }
+
+    # Calculate ROC AUC consistently
+    roc_auc_linear <- as.numeric(roc(y_test_factor == "Tumor", y_prob_linear)$auc)
 
     # Store performance metrics for linear kernel
     performance_summary <- performance_summary %>% 

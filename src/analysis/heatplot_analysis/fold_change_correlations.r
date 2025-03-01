@@ -109,15 +109,19 @@ calculate_similarities <- function(fold_changes) {
     # Calculate similarity score for each feature
     feature_similarities <- merged %>%
       mutate(
-        # First check sign agreement
+        # Log transform feature contributions (add small pseudocount to handle zeros/negatives)
+        Value_imp_log = sign(Value_imp) * log1p(abs(Value_imp)),
+        # Fold changes are already log2 transformed
+        
+        # Check sign agreement using original values
         sign_agreement = sign(Value_fold) == sign(Value_imp),
         
-        # Calculate normalized magnitude similarity (scale-invariant)
-        max_magnitude = pmax(abs(Value_fold), abs(Value_imp)),
-        min_magnitude = pmin(abs(Value_fold), abs(Value_imp)),
+        # Calculate magnitude similarity using log-transformed values
+        max_magnitude = pmax(abs(Value_fold), abs(Value_imp_log)),
+        min_magnitude = pmin(abs(Value_fold), abs(Value_imp_log)),
         magnitude_similarity = min_magnitude / max_magnitude,
         
-        # Combine sign and magnitude (ranges from -1 to 1)
+        # Combine sign and magnitude
         Value = ifelse(sign_agreement, magnitude_similarity, -magnitude_similarity)
       ) %>%
       select(Feature, Value)

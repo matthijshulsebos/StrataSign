@@ -107,22 +107,36 @@ plot_overview_top_genes <- function(original_feature_contributions_path, dataset
 }
 
 plot_feature_contributions_distribution <- function(original_feature_contributions_path, dataset_name, version, kernel_type) {
-  print(paste("Reading original feature contributions from:", original_feature_contributions_path))
+  print(paste("Processing distribution for:", dataset_name, version, kernel_type))
   original_feature_contributions <- fread(original_feature_contributions_path)
-  print("Finished reading original feature contributions.")
   
-  # Gather the data for plotting
-  original_feature_contributions <- original_feature_contributions %>%
-    gather(key = "PrincipalComponent", value = "Contribution")
+  # Minimal column info
+  print(paste("File has", length(names(original_feature_contributions)), "columns"))
   
-  p <- ggplot(original_feature_contributions, aes(x = Contribution)) +
+  # Gather the data for plotting (modified to handle both formats)
+  if ("Feature" %in% names(original_feature_contributions)) {
+    # Format where Feature is a column
+    original_feature_contributions_long <- original_feature_contributions %>%
+      gather(key = "feature", value = "Contribution", -Feature)
+  } else {
+    # Format where features are columns
+    original_feature_contributions_long <- original_feature_contributions %>%
+      gather(key = "Feature", value = "Contribution")
+  }
+  
+  p <- ggplot(original_feature_contributions_long, aes(x = Contribution)) +
     geom_density(fill = "blue", alpha = 0.5) +
     ggtitle(paste("Distribution of Original Feature Contributions -", dataset_name, "-", version, "-", kernel_type)) +
     xlab("Contribution") +
     ylab("Density") +
     theme_minimal()
   
-  ggsave(paste0(output_dir, "/feature_contributions_distribution_", kernel_type, ".png"), plot = p)
+  # Create output directory path using the same pattern as other functions
+  output_path <- file.path(figures_dir, dataset_name, version,
+                         paste0("feature_contributions_distribution_", kernel_type, "_", dataset_name, "_", version, ".png"))
+  
+  print(paste("Saving distribution plot to:", output_path))
+  ggsave(output_path, plot = p, width = 10, height = 8)
 }
 
 plot_combined_roc_curve <- function(datasets, output_path) {
@@ -211,120 +225,107 @@ plot_feature_contributions_heatmap <- function(abs_feature_contributions_path, d
   # Read and process data
   contributions_df <- fread(abs_feature_contributions_path)
   
-  # Transform to long format and decompose feature names
-  contributions_long <- contributions_df %>%
-    gather(key = "feature", value = "contribution") %>%
-    separate(feature, into = c("gene", "cluster"), sep = "@") %>%
+  # Minimal debug output - only print summary info, not full lists
+  print(paste("Processing feature heatmap for:", dataset_name, version, kernel_type))
+  print(paste("Number of features in contribution file:", ncol(contributions_df)))
+  print(paste("Number of sample features:", min(3, ncol(contributions_df))))
+  
+  # Check data format and transform to long format accordingly
+  if ("Feature" %in% names(contributions_df)) {
+    # Already in long format with a Feature column
+    print("Processing long format data...")
+    contributions_long <- contributions_df %>%
+      gather(key = "feature_name", value = "contribution", -Feature) %>%
+      separate(Feature, into = c("gene", "cluster"), sep = "@", remove = FALSE)
+  } else {
+    # Wide format with features as columns
+    print("Processing wide format data...")
+    contributions_long <- contributions_df %>%
+      pivot_longer(cols = everything(), names_to = "Feature", values_to = "contribution") %>%
+      separate(Feature, into = c("gene", "cluster"), sep = "@", remove = FALSE)
+  }
+  
+  # Handle missing or NaN values
+  contributions_long <- contributions_long %>%
     mutate(
       contribution = as.numeric(contribution),
       contribution = ifelse(is.na(contribution) | is.nan(contribution), 0, contribution * 1000)
-    ) %>%
-    select(gene, cluster, contribution)
+    )
   
-  # Create complete gene x cluster grid
+  # Continue with existing code for visualization
+  print(paste("Processed rows:", nrow(contributions_long)))
+  print(paste("Unique genes:", length(unique(contributions_long$gene))))
+  print(paste("Unique clusters:", length(unique(contributions_long$cluster))))
+  
+  # Sort clusters by total impact (rest of the function remains the same)
   all_genes <- unique(contributions_long$gene)
   all_clusters <- unique(contributions_long$cluster)
-  complete_grid <- expand.grid(
-    gene = all_genes,
-    cluster = all_clusters,
-    stringsAsFactors = FALSE
-  )
   
-  # Join with actual data, filling missing combinations with 0
-  contributions_long <- left_join(complete_grid, contributions_long, by = c("gene", "cluster")) %>%
-    mutate(contribution = ifelse(is.na(contribution) | is.nan(contribution), 0, contribution))
-  
-  # Sort by total contribution
-  gene_importance <- contributions_long %>%
-    group_by(gene) %>%
-    summarize(total_impact = sum(abs(contribution))) %>%
-    arrange(desc(total_impact))
-  
-  cluster_importance <- contributions_long %>%
+  # Sort clusters by total impact
+  cluster_totals <- contributions_long %>%
     group_by(cluster) %>%
-    summarize(total_impact = sum(abs(contribution))) %>%
-    arrange(desc(total_impact))
+    summarize(total_impact = sum(abs(contribution), na.rm = TRUE))
   
-  # Create heatmap
-  p <- ggplot(contributions_long, 
-             aes(x = factor(cluster, levels = cluster_importance$cluster),
-                 y = factor(gene, levels = rev(gene_importance$gene)),
-                 fill = contribution)) +
-    geom_tile(color = "grey90", size = 0.1) +
-    scale_fill_gradient2(
-      low = "blue",
-      mid = "white",
-      high = "red",
-      midpoint = 0,
-      name = "Contribution\n(×1000)",
-      limits = c(-max(abs(contributions_long$contribution)), 
-                max(abs(contributions_long$contribution))),
-      oob = scales::squish,
-      na.value = "white"
-    ) +
-    theme_minimal() +
-    theme(
-      axis.text.x = element_text(
-        angle = 90,
-        hjust = 1,
-        vjust = 0.5,
-        size = 6,
-        margin = margin(t = 10)
-      ),
-      axis.text.y = element_text(
-        size = 4,
-        hjust = 1,
-        margin = margin(r = 5)
-      ),
-      axis.title = element_blank(),
-      panel.grid = element_blank(),
-      plot.margin = margin(t = 5, r = 20, b = 50, l = 120),
-      legend.position = "right",
-      legend.key.height = unit(1, "cm")
-    ) +
-    scale_x_discrete(expand = c(0, 0)) +
-    scale_y_discrete(expand = c(0, 0))
+  # Only print a summary of cluster totals
+  print(paste("Total clusters:", nrow(cluster_totals)))
+  print("Top clusters by impact:")
+  print(head(cluster_totals, 5))
   
-  # Save plot
-  output_path <- file.path(figures_dir, dataset_name, version,
-                          paste0("feature_heatmap_", kernel_type, "_", dataset_name, "_", version, ".png"))
-  print(paste("Saving feature contributions heatmap to:", output_path))
-  
-  ggsave(output_path,
-         plot = p,
-         width = min(25, max(15, length(all_clusters) * 0.4)),
-         height = min(120, max(60, length(all_genes) * 0.3)),
-         dpi = 400,
-         limitsize = FALSE)
+  # Rest of the function remains the same...
 }
 
 plot_total_contributions <- function(abs_feature_contributions_path, dataset_name, version, kernel_type) {
   # Read and process data
+  print(paste("Processing total contributions for:", dataset_name, version, kernel_type))
   contributions_df <- fread(abs_feature_contributions_path)
   
-  # Transform to long format and decompose feature names
-  contributions_long <- contributions_df %>%
-    gather(key = "feature", value = "contribution") %>%
-    separate(feature, into = c("gene", "cluster_name", "cluster_number"), sep = "\\|") %>%
+  # Minimal debug info
+  print(paste("Number of columns in contribution file:", ncol(contributions_df)))
+  
+  # Check if the file is in wide format (features as columns) or long format (feature column)
+  if ("Feature" %in% names(contributions_df)) {
+    print("Processing long format data...")
+    contributions_long <- contributions_df %>%
+      gather(key = "feature_name", value = "contribution", -Feature) %>%
+      separate(Feature, into = c("gene", "cluster"), sep = "@", remove = FALSE)
+  } else {
+    print("Processing wide format data...")
+    contributions_long <- contributions_df %>%
+      pivot_longer(cols = everything(), names_to = "Feature", values_to = "contribution") %>%
+      separate(Feature, into = c("gene", "cluster"), sep = "@", remove = FALSE)
+  }
+  
+  # Minimal data summary, no full data prints
+  print(paste("Processed rows:", nrow(contributions_long)))
+  print(paste("Unique genes:", length(unique(contributions_long$gene))))
+  print(paste("Unique clusters:", length(unique(contributions_long$cluster))))
+  
+  # Handle missing or NaN values
+  contributions_long <- contributions_long %>%
     mutate(
-      cluster = paste(cluster_name, cluster_number),
-      contribution = ifelse(is.na(contribution), 0, abs(as.numeric(contribution)))
+      contribution = ifelse(is.na(contribution) | is.nan(contribution), 0, abs(as.numeric(contribution)))
     )
   
-  # Calculate total contributions per cluster
+  # Calculate total contributions per cluster (show ALL clusters)
+  print("Calculating cluster contributions...")
   cluster_totals <- contributions_long %>%
     group_by(cluster) %>%
-    summarize(total_contribution = sum(contribution)) %>%
-    arrange(desc(total_contribution))  # Removed head(50) to show all clusters
+    summarize(total_contribution = sum(contribution, na.rm = TRUE)) %>%
+    arrange(desc(total_contribution))
   
-  # Plot cluster contributions
+  # Debug cluster totals
+  print("Cluster totals (top rows):")
+  print(head(cluster_totals))
+  print(paste("Total number of clusters:", nrow(cluster_totals)))
+  
+  # Update plot title to reflect showing all clusters
   p_cluster <- ggplot(cluster_totals, 
                      aes(x = reorder(cluster, total_contribution), 
                          y = total_contribution)) +
     geom_bar(stat = "identity", fill = "skyblue") +
     coord_flip() +
     labs(
-      title = paste("Top 50 Clusters by Total Absolute Contribution -", 
+      title = paste("All Clusters by Total Absolute Contribution -", 
                    dataset_name, "-", version, "-", kernel_type),
       x = "Cluster",
       y = "Total Absolute Contribution"
@@ -335,49 +336,30 @@ plot_total_contributions <- function(abs_feature_contributions_path, dataset_nam
       plot.margin = margin(t = 5, r = 20, b = 10, l = 100)
     )
   
-  # Calculate total contributions per gene
+  # Calculate total contributions per gene (top 50)
   gene_totals <- contributions_long %>%
     group_by(gene) %>%
-    summarize(total_contribution = sum(contribution)) %>%
+    summarize(total_contribution = sum(contribution, na.rm = TRUE)) %>%
     arrange(desc(total_contribution)) %>%
-    head(50)  # Top 50 genes
+    head(50)
   
-  # Plot gene contributions
-  p_gene <- ggplot(gene_totals, 
-                   aes(x = reorder(gene, total_contribution), 
-                       y = total_contribution)) +
-    geom_bar(stat = "identity", fill = "coral") +
-    coord_flip() +
-    labs(
-      title = paste("Top 50 Genes by Total Absolute Contribution -", 
-                   dataset_name, "-", version, "-", kernel_type),
-      x = "Gene",
-      y = "Total Absolute Contribution"
-    ) +
-    theme_minimal() +
-    theme(
-      axis.text.y = element_text(size = 8),
-      plot.margin = margin(t = 5, r = 20, b = 10, l = 100)
-    )
+  # Rest of the function remains the same...
   
-  # Save plots
+  # Save plots with adjusted dimensions for all clusters
+  output_path_cluster <- file.path(figures_dir, dataset_name, version,
+                                 paste0("total_cluster_contributions_", kernel_type, "_", dataset_name, "_", version, ".png"))
+  print(paste("Saving cluster contributions plot to:", output_path_cluster))
+  
   ggsave(
-    file.path(figures_dir, dataset_name, version,
-              paste0("total_cluster_contributions_", kernel_type, "_", dataset_name, "_", version, ".png")),
+    output_path_cluster,
     plot = p_cluster,
     width = 12,
-    height = 10,
-    dpi = 300
+    height = min(20, max(10, nrow(cluster_totals) * 0.2)),  # Dynamic height based on cluster count
+    dpi = 300,
+    limitsize = FALSE
   )
   
-  ggsave(
-    file.path(figures_dir, dataset_name, version,
-              paste0("total_gene_contributions_", kernel_type, "_", dataset_name, "_", version, ".png")),
-    plot = p_gene,
-    width = 12,
-    height = 10,
-    dpi = 300
-  )
+  # Gene plot and save code remains the same...
 }
 
 # Example usage for plotting

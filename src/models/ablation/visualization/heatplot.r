@@ -174,7 +174,6 @@ plot_enhanced_heatmap <- function(data_path, n_top_genes = 50, output_path = NUL
     col = col_fun,
     cluster_rows = row_hc,
     cluster_columns = col_hc,
-    # Use natural cluster breaks from dendrogram only if k > 1
     row_split = row_split,
     column_split = col_split,
     
@@ -196,10 +195,15 @@ plot_enhanced_heatmap <- function(data_path, n_top_genes = 50, output_path = NUL
     heatmap_width = unit(10, "inches")
   )
   
-  # Adjust output dimensions to accommodate larger dendrograms
+  # Adjust output dimensions and add transparency
   if(!is.null(output_path)) {
-    png(output_path, width = 14, height = 12, units = "in", res = 300)  # Increased dimensions
-    draw(ht)
+    png(output_path, 
+        width = 14, 
+        height = 12, 
+        units = "in", 
+        res = 300,
+        bg = "transparent")  # Set transparent background for PNG
+    draw(ht, background = "transparent")  # Set transparent background for heatmap
     dev.off()
   }
   
