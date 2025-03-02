@@ -9,24 +9,24 @@ library(tibble)
 library(ggplot2)
 
 # Define base path and output directories
-base_path <- "data/ablation"
-intermediates_dir <- "data/ablation/intermediates/lasso"
-models_dir <- "results/ablation/models/lasso"
-summary_dir <- "results/ablation/summary"
+base_path <- "output/training_data/raw"
+models_dir <- "output/models/lasso"
+predictions_dir <- "output/models/lasso"
+feature_importance_dir <- "output/models/lasso"
+summary_dir <- "output/models/lasso"
 
 # Create directories if they don't exist
-dir.create(intermediates_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(models_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(summary_dir, recursive = TRUE, showWarnings = FALSE)
 
-# Define datasets structure
+# Simplified dataset path function - no conditionals needed
 create_dataset_paths <- function(dataset_name, version) {
   list(
-    X_train = file.path(base_path, "datasets", dataset_name, version, paste0("X_train_", dataset_name, ifelse(version == "default", "", paste0("_", version)), ".csv")),
-    X_test = file.path(base_path, "datasets", dataset_name, version, paste0("X_test_", dataset_name, ifelse(version == "default", "", paste0("_", version)), ".csv")),
-    y_train = file.path(base_path, "datasets", dataset_name, version, paste0("y_train_", dataset_name, ifelse(version == "default", "", paste0("_", version)), ".csv")),
-    y_test = file.path(base_path, "datasets", dataset_name, version, paste0("y_test_", dataset_name, ifelse(version == "default", "", paste0("_", version)), ".csv")),
-    metadata = file.path(base_path, "datasets", dataset_name, version, paste0("metadata_", dataset_name, ifelse(version == "default", "", paste0("_", version)), ".csv"))
+    X_train = file.path(base_path, dataset_name, version, paste0("X_train_", dataset_name, "_", version, ".csv")),
+    X_test = file.path(base_path, dataset_name, version, paste0("X_test_", dataset_name, "_", version, ".csv")),
+    y_train = file.path(base_path, dataset_name, version, paste0("y_train_", dataset_name, "_", version, ".csv")),
+    y_test = file.path(base_path, dataset_name, version, paste0("y_test_", dataset_name, "_", version, ".csv")),
+    metadata = file.path(base_path, dataset_name, version, paste0("metadata_", dataset_name, "_", version, ".csv"))
   )
 }
 
@@ -38,7 +38,7 @@ datasets <- list(
   lcam_both = list()
 )
 
-versions <- c("default", "random1", "random2", "random3")
+versions <- c("metabolic", "matched_nonmetabolic", "matched_random_a", "matched_random_b")
 
 # Populate datasets with paths
 for (dataset_name in names(datasets)) {
@@ -62,19 +62,22 @@ for (dataset_name in names(datasets)) {
     print(paste("Processing dataset:", dataset_name, "version:", version))
     
     # Create directories for current dataset and version
-    dir.create(paste0(intermediates_dir, "/", dataset_name, "/", version), 
-               recursive = TRUE, showWarnings = FALSE)
-    dir.create(paste0(models_dir, "/", dataset_name, "/", version), 
-               recursive = TRUE, showWarnings = FALSE)
+    predictions_output_dir <- file.path(predictions_dir, dataset_name, version, "predictions")
+    feature_importance_output_dir <- file.path(feature_importance_dir, dataset_name, version, "feature_importance")
+    model_output_dir <- file.path(models_dir, dataset_name, version)
     
-    # Load datasets - using the same structure as SVM
+    dir.create(predictions_output_dir, recursive = TRUE, showWarnings = FALSE)
+    dir.create(feature_importance_output_dir, recursive = TRUE, showWarnings = FALSE)
+    dir.create(model_output_dir, recursive = TRUE, showWarnings = FALSE)
+    
+    # Load datasets
     X_train <- fread(datasets[[dataset_name]][[version]]$X_train)
     X_test <- fread(datasets[[dataset_name]][[version]]$X_test)
     y_train <- fread(datasets[[dataset_name]][[version]]$y_train)
     y_test <- fread(datasets[[dataset_name]][[version]]$y_test)
     metadata <- fread(datasets[[dataset_name]][[version]]$metadata)
 
-    # Ensure proper label encoding - Match SVM implementation
+    # Ensure proper label encoding
     y_train$x <- factor(y_train$x, levels = c("Normal", "Tumor"), labels = c(0, 1))
     y_test$x <- factor(y_test$x, levels = c("Normal", "Tumor"), labels = c(0, 1))
     
@@ -82,7 +85,7 @@ for (dataset_name in names(datasets)) {
     y_train_numeric <- as.numeric(as.character(y_train$x))
     y_test_numeric <- as.numeric(as.character(y_test$x))
     
-    # Remove constant/zero-variance columns - Match SVM implementation
+    # Remove constant/zero-variance columns
     nzv <- nearZeroVar(X_train, saveMetrics = TRUE)
     X_train <- X_train[, !nzv$zeroVar, with = FALSE]
     X_test <- X_test[, !nzv$zeroVar, with = FALSE]
@@ -95,8 +98,8 @@ for (dataset_name in names(datasets)) {
                         nfolds = nrow(X_train),       # LOOCV: number of folds equals number of samples
                         type.measure = "deviance"     # Measure to evaluate model
     )
-    
-    # Get predictions on test set
+
+    # Get predictions on test set using optimal lambda
     y_prob <- predict(cv_fit, as.matrix(X_test), s = "lambda.min", type = "response")[,1]
     y_pred <- ifelse(y_prob > 0.5, 1, 0)
     
@@ -121,11 +124,7 @@ for (dataset_name in names(datasets)) {
               F1_score = f1_score,
               ROC_AUC = roc_auc)
     
-    # Define heatplot intermediates directory
-    heatplot_dir <- "data/ablation/intermediates/heatplot"
-    dir.create(paste0(heatplot_dir, "/", dataset_name, "/", version), recursive = TRUE, showWarnings = FALSE)
-    
-    # Get feature importance (coefficients)
+    # Get feature importance (coefficients) using optimal lambda
     coef_matrix <- as.matrix(coef(cv_fit, s = "lambda.min"))
     feature_importance <- data.frame(
       Feature = rownames(coef_matrix),
@@ -140,38 +139,14 @@ for (dataset_name in names(datasets)) {
       ) %>%
       arrange(desc(abs(Coefficient)))
     
-    # Save feature importance in both directories
-    # Original location
-    write_csv(feature_importance, 
-              paste0(intermediates_dir, "/", dataset_name, "/", version, 
-                     "/feature_importance_", dataset_name, "_", version, ".csv"))
-    
-    # Heatplot location
+    # Save feature importance 
     write_csv(
       feature_importance %>% 
         select(Feature, Coefficient) %>%
         rename(Value = Coefficient),
-      paste0(heatplot_dir, "/", dataset_name, "/", version, 
-             "/lasso_coefficients_", dataset_name, "_", version, ".csv")
+      file.path(feature_importance_output_dir, 
+                paste0("feature_importance_", dataset_name, "_", version, ".csv"))
     )
-    
-    # Also save absolute coefficients
-    write_csv(
-      feature_importance %>% 
-        select(Feature, Abs_Coefficient) %>%
-        rename(Value = Abs_Coefficient),
-      paste0(heatplot_dir, "/", dataset_name, "/", version, 
-             "/lasso_absolute_coefficients_", dataset_name, "_", version, ".csv")
-    )
-    
-    # Save non-zero features separately (selected by LASSO)
-    selected_features <- feature_importance %>%
-      filter(Coefficient != 0) %>%
-      arrange(desc(Abs_Coefficient))
-    
-    write_csv(selected_features,
-              paste0(intermediates_dir, "/", dataset_name, "/", version, 
-                     "/selected_features_", dataset_name, "_", version, ".csv"))
     
     # Save predictions with proper format
     write_csv(
@@ -179,19 +154,18 @@ for (dataset_name in names(datasets)) {
         y_test = y_test$x,  # This will be 0/1 factors
         y_pred = y_pred     # These are our 0/1 predictions
       ), 
-      paste0(intermediates_dir, "/", dataset_name, "/", version, 
-             "/predictions_", dataset_name, "_", version, ".csv")
+      file.path(predictions_output_dir, 
+             paste0("predictions_", dataset_name, "_", version, ".csv"))
     )
 
     # Save LASSO model
-    dir.create(paste0(models_dir, "/", dataset_name, "/", version), recursive = TRUE, showWarnings = FALSE)
-    saveRDS(cv_fit, paste0(models_dir, "/", dataset_name, "/", version, 
-            "/lasso_model_", dataset_name, "_", version, ".rds"))
+    saveRDS(cv_fit, file.path(model_output_dir, 
+            paste0("lasso_model_", dataset_name, "_", version, ".rds")))
   }
 }
 
 # Save performance summary
-write_csv(performance_summary, paste0(summary_dir, "/lasso_performance_summary.csv"))
-cat("Saved performance summary:", paste0(summary_dir, "/lasso_performance_summary.csv"), "\n")
+write_csv(performance_summary, file.path(summary_dir, "lasso_performance_summary.csv"))
+cat("Saved performance summary:", file.path(summary_dir, "lasso_performance_summary.csv"), "\n")
 
 print("LASSO analysis completed successfully.")
