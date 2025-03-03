@@ -38,7 +38,8 @@ datasets <- list(
   lcam_both = list()
 )
 
-versions <- c("metabolic", "matched_nonmetabolic", "matched_random_a", "matched_random_b")
+# Update to use new dataset names
+versions <- c("metabolic", "nonmetabolic", "random")
 
 # Populate datasets with paths
 for (dataset_name in names(datasets)) {
