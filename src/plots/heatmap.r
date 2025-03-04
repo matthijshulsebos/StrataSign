@@ -7,15 +7,19 @@ library(ComplexHeatmap)
 library(circlize)
 library(tibble)
 
-
-#' Cut dendrogram at optimal height to create meaningful clusters
-#' @param hc Hierarchical clustering object
-#' @param h Height at which to cut (NULL for automatic)
-#' @param min_clusters Minimum number of clusters
-#' @param max_clusters Maximum number of clusters
-#' @param return_factor Whether to return factor or number
-#' @return Either cluster factor or number of clusters
 cut_dendrogram <- function(hc, h = NULL, min_clusters = 2, max_clusters = 6, return_factor = FALSE) {
+  "Cut dendrogram at optimal height to create meaningful clusters
+  
+  Parameters:
+    hc: Hierarchical clustering object from hclust
+    h: Height at which to cut (NULL for automatic detection)
+    min_clusters: Minimum number of clusters to create
+    max_clusters: Maximum number of clusters to create
+    return_factor: If TRUE, returns factor of clusters; if FALSE, returns count
+  
+  Returns:
+    Either factor of cluster assignments or number of clusters"
+  
   if (is.null(h)) {
     # Calculate height gaps
     heights <- sort(hc$height, decreasing = TRUE)
@@ -84,11 +88,16 @@ cut_dendrogram <- function(hc, h = NULL, min_clusters = 2, max_clusters = 6, ret
   }
 }
 
-#' Prepare data matrix for heatmap visualization
-#' @param data_path Path to feature importance CSV
-#' @param n_top_genes Number of top genes to include
-#' @return Preprocessed data matrix
 prepare_heatmap_data <- function(data_path, n_top_genes = 50) {
+  "Prepare data matrix for heatmap visualization
+  
+  Parameters:
+    data_path: Path to feature importance CSV file
+    n_top_genes: Number of top genes to include by absolute importance
+  
+  Returns:
+    Matrix with genes as rows and clusters as columns"
+  
   # Read data
   data_df <- fread(data_path, colClasses = c("Feature" = "character", "Value" = "numeric"))
   
@@ -126,12 +135,17 @@ prepare_heatmap_data <- function(data_path, n_top_genes = 50) {
   return(as.matrix(data_matrix))
 }
 
-#' Generate heatmap with Manhattan distance clustering
-#' @param data_path Path to feature importance file
-#' @param n_top_genes Number of top genes to include
-#' @param output_path Output path for the heatmap image
-#' @return Heatmap object
 plot_enhanced_heatmap <- function(data_path, n_top_genes = 50, output_path = NULL) {
+  "Generate heatmap with optimized clustering for feature importance data
+  
+  Parameters:
+    data_path: Path to feature importance CSV file
+    n_top_genes: Number of top genes to include
+    output_path: Path to save heatmap (NULL to not save)
+  
+  Returns:
+    ComplexHeatmap object"
+  
   # Prepare data
   cat("\nProcessing file:", basename(data_path), "\n")
   data_matrix <- prepare_heatmap_data(data_path, n_top_genes)
@@ -194,9 +208,15 @@ plot_enhanced_heatmap <- function(data_path, n_top_genes = 50, output_path = NUL
   return(ht)
 }
 
-#' Create heatplots for all feature importance files
-#' @return NULL
 create_all_heatplots <- function() {
+  "Create heatplots for all feature importance files across model types
+  
+  Searches through model directories to find and process feature importance CSV files.
+  Generates and saves heatmap visualizations for each file found.
+  
+  Returns:
+    NULL - creates heatmap files as side effect"
+  
   # Base directories
   models_base_dir <- "output/models"
   output_base_dir <- "output/figures/heatmap"
