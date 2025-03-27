@@ -4,7 +4,7 @@ library(readr)
 library(Matrix)
 library(scales)
 
-# Load data
+# Load Leader et al. data
 if (!exists("lung_ldm")) {
   message("Loading Mt. Sinai scRNAseq data into R")
   load("base/data/lung_ldm.rd")
@@ -21,7 +21,7 @@ table_s1 <- table_s1 %>% filter(Use.in.Clustering.Model. == "Yes")
 # Convert 'sample_ID' column to character
 table_s1 <- table_s1 %>% mutate(sample_ID = as.character(sample_ID))
 
-# Define clusters to exclude
+# Define doublet clusters to exclude
 clusters_to_exclude <- c(3, 4, 6, 12, 15, 21, 22, 24, 26, 27, 60)
 message(paste("Excluding doublets:", paste(clusters_to_exclude, collapse = ", ")))
 
@@ -34,7 +34,7 @@ lcam_both_clusters <- c(lcam_hi_clusters, lcam_lo_clusters)
 preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "metabolic") {
   counts <- lung_ldm$dataset$counts  # 3D matrix: sample × gene × cluster
 
-  # First, filter out the unwanted clusters
+  # Filter out the unwanted clusters
   all_clusters <- as.numeric(dimnames(counts)[[3]])
   clusters_to_keep <- all_clusters[!all_clusters %in% clusters_to_exclude]
   counts <- counts[, , as.character(clusters_to_keep), drop = FALSE]
@@ -57,7 +57,7 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
     genes_to_use <- setdiff(all_genes, metabolic_genes)
     # Limit to the same number of genes as metabolic for fair comparison
     if (length(genes_to_use) > length(metabolic_genes)) {
-      set.seed(42)  # For reproducibility
+      set.seed(42)
       genes_to_use <- sample(genes_to_use, length(metabolic_genes))
     }
     suffix <- "_nonmetabolic"
@@ -101,8 +101,7 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
   # Convert 'sample_ID' to character
   counts_long$sample_ID <- as.character(counts_long$sample_ID)
 
-  # Step 1: Normalize by sample total to account for sequencing depth differences
-  # Calculate mean sample size for sample normalization
+  # Calculate mean total counts per sample
   mean_sample_size <- counts_long %>%
     group_by(sample_ID) %>%
     summarize(sample_size = sum(count), .groups = 'drop') %>%
@@ -115,8 +114,7 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
     mutate(total_sample_counts = sum(count),
            sample_normalized_count = (count / total_sample_counts) * mean_sample_size) %>%
     ungroup()
-
-  # Step 2: Normalize each cluster within each sample based on real cluster proportions
+  
   # Calculate the number of cells per cluster per sample
   cluster_proportions <- cell_metadata %>%
     group_by(sample_ID, cluster_ID) %>%
@@ -149,9 +147,29 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
     # Clean up intermediate columns
     select(-total_sample_counts, -cluster_cell_count, -total_cells, -cluster_proportion, -cluster_ID, -total_after_norm)
 
+  # Check final normalization
+  final_norm_check <- counts_long %>% 
+    group_by(sample_ID) %>% 
+    summarize(total = sum(normalized_count), 
+              expected = mean_sample_size,
+              diff = abs(total - expected)) %>%
+    ungroup()
+  message("Final normalization check - max difference from expected: ", 
+          round(max(final_norm_check$diff), 6),
+          ", mean: ", round(mean(final_norm_check$diff), 6))
+
   # Apply log transformation
   counts_long <- counts_long %>%
     mutate(log_normalized_count = log1p(normalized_count))
+
+  # Check log transformation stats
+  log_stats <- summarize(counts_long, 
+                         min_val = min(log_normalized_count),
+                         mean_val = mean(log_normalized_count), 
+                         max_val = max(log_normalized_count))
+  message("Log transform stats - min: ", round(log_stats$min_val, 4),
+          ", mean: ", round(log_stats$mean_val, 4), 
+          ", max: ", round(log_stats$max_val, 4))
 
   # Pivot so each gene-cluster combo becomes its own column
   counts_wide <- counts_long %>%
