@@ -1,336 +1,232 @@
 # Load required libraries
-library(DESeq2)
 library(dplyr)
 library(tidyverse)
 library(readr)
-library(clusterProfiler)
-library(org.Hs.eg.db)
-library(ReactomePA)
-library(enrichplot)
 library(Matrix)
 
-# Load lung_ldm data
-load("data/lung_ldm.rd")
+# Create output directory
+dir.create("output/differential_expression", recursive = TRUE, showWarnings = FALSE)
 
-# Read data
-raw_counts <- lung_ldm$dataset$umitab
-cell_to_cluster <- lung_ldm$dataset$cell_to_cluster
-cell_to_sample <- lung_ldm$dataset$cell_to_sample
-cluster_annot <- read_csv("input_tables/annots_list.csv")
-
-# Function to aggregate counts by cluster and sample
-preprocess_counts <- function(raw_counts, cell_to_cluster, cell_to_sample, cluster_id) {
-  # Subset cells belonging to this cluster
-  cluster_cells <- which(cell_to_cluster == cluster_id)
-  cluster_counts <- raw_counts[, cluster_cells]
-  cluster_samples <- cell_to_sample[cluster_cells]
-  
-  # Aggregate counts by sample
-  sample_counts <- sapply(unique(cluster_samples), function(sample) {
-    sample_cells <- which(cluster_samples == sample)
-    if(length(sample_cells) > 0) {
-      # Sum counts across cells for each sample
-      rowSums(cluster_counts[, sample_cells, drop = FALSE])
-    } else {
-      rep(0, nrow(cluster_counts))
-    }
-  })
-  
-  # Convert to matrix and name columns
-  sample_counts <- as.matrix(sample_counts)
-  colnames(sample_counts) <- unique(cluster_samples)
-  rownames(sample_counts) <- rownames(raw_counts)
-  
-  return(sample_counts)
+# Load Leader et al. data
+if (!exists("lung_ldm")) {
+  load("base/data/lung_ldm.rd")
 }
 
-# Read and process metabolic genes list
-metabolic_genes_df <- read_csv("src_output/KEGG/hsa01100_genes.csv")
+# Load metadata
+table_s1 <- read_csv("base/input_tables/table_s1_sample_table.csv")
+annots_list <- read_csv("base/input_tables/annots_list.csv")
+cell_metadata <- read_csv("base/input_tables/cell_metadata.csv") # Added cell metadata
 
-# Check if we have SYMBOL column, if not convert from ENTREZID
-if("SYMBOL" %in% colnames(metabolic_genes_df)) {
-  metabolic_genes <- metabolic_genes_df %>% pull(SYMBOL)
-} else if("ENTREZID" %in% colnames(metabolic_genes_df)) {
-  gene_conversion <- bitr(
-    metabolic_genes_df$ENTREZID, 
-    fromType = "ENTREZID",
-    toType = "SYMBOL",
-    OrgDb = org.Hs.eg.db
-  )
-  metabolic_genes <- gene_conversion$SYMBOL
-} else {
-  stop("Metabolic genes file must contain either SYMBOL or ENTREZID column")
-}
+# Filter samples to those used in the clustering model 
+table_s1 <- table_s1 %>% 
+  filter(Use.in.Clustering.Model. == "Yes") %>%
+  filter(!is.na(tissue)) %>%
+  mutate(tissue = toupper(tissue))
 
-# Function to perform differential expression analysis for one cluster
-perform_de_analysis <- function(count_matrix, sample_info, cluster_name, metabolic_genes, lineage, sub_lineage) {
-  # Create output directory for this cluster
-  dir.create(file.path("src_output/cluster_de", cluster_name), recursive = TRUE, showWarnings = FALSE)
-  
-  # Use sub_lineage if available, otherwise use lineage
-  display_name <- if(!is.na(sub_lineage) && sub_lineage != "") {
-    sub_lineage
-  } else {
-    lineage
-  }
-  
-  # Filter for metabolic genes
-  metabolic_indices <- rownames(count_matrix) %in% metabolic_genes
-  count_matrix <- count_matrix[metabolic_indices, ]
-  
-  print(paste("Number of metabolic genes:", sum(metabolic_indices)))
-  
-  # Check if we have any metabolic genes
-  if(sum(metabolic_indices) == 0) {
-    warning(paste("No metabolic genes found in cluster", cluster_name))
-    return(NULL)
-  }
-  
-  # Prepare sample metadata
-  sample_metadata <- sample_info %>%
-    dplyr::select(
-      sample_id = 1,    # sample IDs from first column
-      condition = 6     # tumor/normal condition from sixth column
-    ) %>%
-    filter(sample_id %in% colnames(count_matrix)) %>%
-    mutate(condition = factor(condition)) %>%
-    arrange(match(sample_id, colnames(count_matrix)))
-  
-  # Print condition distribution
-  print("Number of samples per condition:")
-  print(table(sample_metadata$condition))
-  
-  # Pre-filter genes with all zeros
-  keep <- rowSums(count_matrix > 0) > 0
-  count_matrix <- count_matrix[keep, ]
-  
-  # Try to run DESeq2 analysis
-  tryCatch({
-    # Create DESeq2 object
-    dds <- DESeqDataSetFromMatrix(
-      countData = round(count_matrix),
-      colData = sample_metadata,
-      design = ~ condition
-    )
-    
-    # Filter low count genes
-    keep <- rowSums(counts(dds) >= 10) >= 5
-    dds <- dds[keep,]
-    
-    # Run DESeq2
-    dds <- DESeq(dds)
-    res <- results(dds)
-    
-    # Convert results to data frame
-    res_df <- as.data.frame(res) %>%
-      rownames_to_column("gene") %>%
-      arrange(padj)
-    
-    # Save results
-    write_csv(res_df, file.path("src_output/cluster_de", cluster_name, "metabolic_de_results.csv"))
-    
-    # Create volcano plot
-    volcano_plot <- ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj))) +
-      geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "grey") +
-      geom_point(aes(color = padj < 0.05), alpha = 0.6) +
-      scale_color_manual(
-        values = c("grey", "red"),
-        labels = c("Not significant", "Significant"),
-        name = "Differential Expression"
-      ) +
-      theme_minimal() +
-      labs(
-        title = paste("Metabolic Genes Volcano Plot -", display_name),
-        x = "Log2 Fold Change",
-        y = "-Log10 Adjusted P-value"
-      )
-    
-    ggsave(file.path("src_output/cluster_de", cluster_name, "metabolic_volcano_plot.png"), 
-           volcano_plot, width = 10, height = 8)
-    
-    # Save significant genes
-    significant_genes <- res_df %>%
-      filter(padj < 0.05, !is.na(padj)) %>%
-      arrange(desc(abs(log2FoldChange)))
-    
-    write_csv(significant_genes, 
-             file.path("src_output/cluster_de", cluster_name, "significant_metabolic_genes.csv"))
-    
-    return(significant_genes)
-    
-  }, error = function(e) {
-    warning(paste("Error in DESeq2 analysis for cluster", cluster_name, ":", e$message))
-    return(NULL)
-  })
-}
+# Define doublet clusters to exclude
+clusters_to_exclude <- c(3, 4, 6, 12, 15, 21, 22, 24, 26, 27, 60)
 
-# Function to perform pathway enrichment for one cluster
-perform_pathway_enrichment <- function(significant_genes, cluster_name, lineage, sub_lineage) {
-  if(is.null(significant_genes) || nrow(significant_genes) == 0) {
-    warning(paste("No significant metabolic genes for", cluster_name))
-    return(NULL)
-  }
-  
-  # Use sub_lineage if available, otherwise use lineage
-  display_name <- if(!is.na(sub_lineage) && sub_lineage != "") {
-    sub_lineage
-  } else {
-    lineage
-  }
-  
-  # Create output directory
-  dir.create(file.path("src_output/cluster_de", cluster_name, "enrichment"), 
-             recursive = TRUE, showWarnings = FALSE)
-  
-  # Convert gene IDs
-  genes <- bitr(significant_genes$gene, 
-                fromType = "SYMBOL",
-                toType = c("ENTREZID", "ENSEMBL"),
-                OrgDb = org.Hs.eg.db)
-  
-  # Merge with original data
-  deg_results_with_ids <- significant_genes %>%
-    dplyr::inner_join(genes, by = c("gene" = "SYMBOL"))
-  
-  # Create ranked gene list
-  ranked_genes <- deg_results_with_ids$log2FoldChange
-  names(ranked_genes) <- deg_results_with_ids$ENTREZID
-  ranked_genes <- sort(ranked_genes, decreasing = TRUE)
-  
-  # Perform enrichment analyses focusing on metabolic pathways
-  kegg_enrichment <- enrichKEGG(
-    gene = deg_results_with_ids$ENTREZID,
-    organism = 'hsa',
-    pvalueCutoff = 0.05,
-    universe = unique(bitr(metabolic_genes, 
-                         fromType = "SYMBOL",
-                         toType = "ENTREZID",
-                         OrgDb = org.Hs.eg.db)$ENTREZID)
-  )
-  
-  # Save results
-  write_csv(as.data.frame(kegg_enrichment), 
-           file.path("src_output/cluster_de", cluster_name, "enrichment", "metabolic_KEGG_pathways.csv"))
-  
-  # Create and save plots with display name
-  if(nrow(as.data.frame(kegg_enrichment)) > 0) {
-    dotplot(kegg_enrichment, showCategory = 20) +
-      ggtitle(paste(display_name, "- Metabolic KEGG Pathways"))
-    ggsave(file.path("src_output/cluster_de", cluster_name, "enrichment", "metabolic_KEGG_dotplot.png"), 
-           width = 12, height = 8)
-  }
-  
-  return(kegg_enrichment)
-}
+# Prepare count data
+counts <- lung_ldm$dataset$counts
+ 
+# Filter out doublets
+all_clusters <- as.numeric(dimnames(counts)[[3]])
+clusters_to_keep <- all_clusters[!all_clusters %in% clusters_to_exclude]
+counts <- counts[, , as.character(clusters_to_keep), drop = FALSE]
 
-# Main execution script
-main_analysis <- function() {
-  # Read sample information
-  sample_info <- read_csv("input_tables/table_s1_sample_table.csv")
-  
-  # Create results summary dataframe
-  results_summary <- data.frame(
-    cluster = character(),
-    cell_type = character(),
-    sub_lineage = character(),
-    n_metabolic_genes = numeric(),
-    n_significant_metabolic_genes = numeric(),
-    n_kegg_pathways = numeric(),
+# Filter samples to match table_s1
+sample_ids_to_keep <- table_s1 %>% pull(sample_ID)
+counts <- counts[dimnames(counts)[[1]] %in% sample_ids_to_keep, , , drop = FALSE]
+
+# Calculate cluster proportions
+message("Calculating cell type proportions for normalization...")
+cluster_proportions <- cell_metadata %>%
+  filter(!cluster_ID %in% clusters_to_exclude) %>%
+  mutate(
+    sample_ID = as.character(sample_ID),
+    cluster_ID = as.character(cluster_ID)
+  ) %>%
+  group_by(sample_ID, cluster_ID) %>%
+  summarize(cluster_cell_count = n(), .groups = 'drop') %>%
+  group_by(sample_ID) %>%
+  mutate(total_cells = sum(cluster_cell_count),
+         cluster_proportion = cluster_cell_count / total_cells) %>%
+  ungroup()
+
+# Set reference (normal) and comparison (tumor) levels
+unique_tissues <- sort(unique(table_s1$tissue))
+ref_level <- unique_tissues[1]
+comparison_level <- unique_tissues[2]
+
+# Create sample metadata
+sample_metadata <- table_s1 %>%
+  select(sample_ID, tissue) %>%
+  filter(sample_ID %in% rownames(counts)) %>%
+  mutate(
+    condition = tissue,
+    condition = factor(condition, levels = unique_tissues)
+  ) %>%
+  column_to_rownames("sample_ID")
+
+# Function to process counts for a cluster-specific dataset
+process_counts <- function(count_matrix, sample_metadata, dataset_name, cluster_id) {
+  # Create a long-format data frame
+  counts_long <- data.frame(
+    sample_ID = rep(rownames(count_matrix), each = ncol(count_matrix)),
+    gene = rep(colnames(count_matrix), times = nrow(count_matrix)),
+    count = as.vector(count_matrix),
     stringsAsFactors = FALSE
   )
   
-  # Get number of clusters correctly
-  clusters <- sort(unique(cell_to_cluster))
-  print(paste("Total number of clusters to process:", length(clusters)))
+  # Add condition information
+  counts_long$condition <- sample_metadata[counts_long$sample_ID, "condition"]
   
-  # Perform analysis for each cluster
-  for(i in clusters) {
-    print(paste("\n==== Starting analysis for cluster", i, "===="))
-    cluster_name <- paste0("cluster_", i)
-    
-    # Get cell type and sub_lineage
-    cell_type <- if("lineage" %in% colnames(cluster_annot)) {
-      print(paste("Lineage:", cluster_annot$lineage[i]))
-      cluster_annot$lineage[i]
-    } else {
-      print("No lineage information found")
-      "Unknown"
-    }
-    
-    sub_lineage <- if("sub_lineage" %in% colnames(cluster_annot)) {
-      print(paste("Sub-lineage:", cluster_annot$sub_lineage[i]))
-      cluster_annot$sub_lineage[i]
-    } else {
-      print("No sub-lineage information found")
-      ""
-    }
-    
-    print("Preprocessing counts...")
-    # Preprocess counts for this cluster
-    count_matrix <- preprocess_counts(raw_counts, cell_to_cluster, cell_to_sample, i)
-    print(paste("Count matrix dimensions:", paste(dim(count_matrix), collapse=" x ")))
-    
-    # Count metabolic genes before DE analysis
-    n_metabolic <- sum(rownames(count_matrix) %in% metabolic_genes)
-    print(paste("Number of metabolic genes:", n_metabolic))
-    
-    print("Running differential expression analysis...")
-    # Perform differential expression analysis
-    sig_genes <- perform_de_analysis(count_matrix, sample_info, cluster_name, 
-                                   metabolic_genes, cell_type, sub_lineage)
-    
-    print("Running pathway enrichment...")
-    # Perform pathway enrichment if there are significant genes
-    kegg_results <- NULL
-    if(!is.null(sig_genes) && nrow(sig_genes) > 0) {
-      kegg_results <- perform_pathway_enrichment(sig_genes, cluster_name, 
-                                               cell_type, sub_lineage)
-    }
-    
-    print("Creating summary...")
-    # Create summary row
-    cluster_summary <- data.frame(
-      cluster = cluster_name,
-      cell_type = cell_type,
-      sub_lineage = sub_lineage,
-      n_metabolic_genes = n_metabolic,
-      n_significant_metabolic_genes = if(is.null(sig_genes)) 0 else nrow(sig_genes),
-      n_kegg_pathways = if(is.null(kegg_results)) 0 else nrow(as.data.frame(kegg_results)),
-      stringsAsFactors = FALSE
+  # Filter genes with low counts
+  gene_totals <- counts_long %>%
+    group_by(gene) %>%
+    summarize(total_count = sum(count), .groups = 'drop')
+  
+  genes_to_keep <- gene_totals %>%
+    filter(total_count >= 10) %>%
+    pull(gene)
+  
+  if (length(genes_to_keep) < 10) {
+    message(paste("  Skipping", dataset_name, "- too few genes after filtering"))
+    return(NULL)
+  }
+  
+  counts_long <- counts_long %>% filter(gene %in% genes_to_keep)
+  
+  # Calculate mean sample size for normalization
+  mean_sample_size <- counts_long %>%
+    group_by(sample_ID) %>%
+    summarize(sample_size = sum(count), .groups = 'drop') %>%
+    summarize(mean_size = mean(sample_size)) %>%
+    pull(mean_size)
+  
+  # Normalize counts by total sample counts
+  normalized_counts <- counts_long %>%
+    group_by(sample_ID) %>%
+    mutate(
+      total_sample_counts = sum(count),
+      sample_normalized_count = (count / total_sample_counts) * mean_sample_size,
+      normalized_count = sample_normalized_count
+    ) %>%
+    ungroup()
+  
+  # Apply cell type proportion normalization for cluster-specific analysis
+  cluster_id_str <- as.character(cluster_id)
+  
+  normalized_counts <- normalized_counts %>%
+    # Add cluster_ID column for joining with cluster_proportions
+    mutate(cluster_ID = cluster_id_str) %>%
+    left_join(
+      cluster_proportions %>% 
+        filter(cluster_ID == cluster_id_str),
+      by = c("sample_ID", "cluster_ID")
+    ) %>%
+    mutate(
+      # Default to 1 if cluster_proportion is NA (no matching data)
+      cluster_proportion = ifelse(is.na(cluster_proportion), 1, cluster_proportion),
+      # Correct for over/under-representation by dividing by cluster proportion
+      normalized_count = sample_normalized_count / cluster_proportion
+    ) %>%
+    # Re-normalize to maintain the same total counts per sample
+    group_by(sample_ID) %>%
+    mutate(
+      total_after_norm = sum(normalized_count),
+      normalized_count = normalized_count * (mean_sample_size / total_after_norm)
+    ) %>%
+    ungroup()
+  
+  # Calculate log-normalized counts
+  normalized_counts <- normalized_counts %>%
+    mutate(log_normalized_count = log1p(normalized_count))
+  
+  # Calculate mean expression by condition
+  condition_means <- normalized_counts %>%
+    group_by(gene, condition) %>%
+    summarize(
+      mean_log_expr = mean(log_normalized_count),
+      .groups = 'drop'
+    ) %>%
+    pivot_wider(
+      names_from = condition, 
+      values_from = mean_log_expr
     )
-    
-    # Add to results summary
-    results_summary <- rbind(results_summary, cluster_summary)
-    
-    print(paste("==== Completed analysis for cluster", i, "====\n"))
-    
-    # Save intermediate results after each cluster
-    write_csv(results_summary, "src_output/cluster_de/metabolic_analysis_summary_intermediate.csv")
-  }
   
-  print("\nAll clusters processed. Creating final outputs...")
+  # Calculate log2 fold changes
+  result_df <- condition_means %>%
+    mutate(
+      log2FoldChange = log2((exp(.data[[comparison_level]]) + 1) / (exp(.data[[ref_level]]) + 1))
+    )
   
-  # Save final results summary
-  write_csv(results_summary, "src_output/cluster_de/metabolic_analysis_summary.csv")
-  
-  # Create summary visualization
-  if(nrow(results_summary) > 0) {
-    ggplot(results_summary, aes(x = cell_type, y = n_significant_metabolic_genes)) +
-      geom_bar(stat = "identity") +
-      theme_minimal() +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-      labs(title = "Number of Significant Metabolic DEGs by Cell Type",
-           x = "Cell Type",
-           y = "Number of Significant Metabolic Genes")
-    
-    ggsave("src_output/cluster_de/metabolic_deg_summary_by_celltype.png", 
-           width = 12, height = 6)
-  }
-  
-  # Print summary
-  print("\nAnalysis complete. Summary of results:")
-  print(results_summary)
+  return(result_df)
 }
 
-# Run the analysis
-main_analysis() 
+# Process individual clusters
+results_by_cluster <- list()
+message("Processing clusters with normalized fold change approach...")
+
+for (cluster_id in clusters_to_keep) {
+  message(paste("Processing cluster", cluster_id))
+  
+  # Get counts for this cluster
+  cluster_counts <- counts[, , as.character(cluster_id)]
+  common_samples <- intersect(rownames(cluster_counts), rownames(sample_metadata))
+  
+  # Skip clusters with too few samples
+  if (length(common_samples) < 10) {
+    message(paste("  Skipping cluster", cluster_id, "- too few samples"))
+    next
+  }
+  
+  # Prepare count data for this cluster
+  cluster_counts_ordered <- cluster_counts[common_samples, ]
+  sample_metadata_ordered <- sample_metadata[common_samples, , drop=FALSE]
+  
+  # Check if we have samples from both conditions
+  condition_counts <- table(sample_metadata_ordered$condition)
+  if (length(condition_counts) < 2 || any(condition_counts < 3)) {
+    message(paste("  Skipping cluster", cluster_id, "- insufficient samples per condition"))
+    next
+  }
+  
+  tryCatch({
+    # Process this cluster's counts - passing cluster_id for proportion normalization
+    cluster_results <- process_counts(cluster_counts_ordered, sample_metadata_ordered, 
+                                     paste("cluster", cluster_id), cluster_id)
+    
+    if (!is.null(cluster_results)) {
+      # Add cluster ID
+      cluster_results$cluster_ID <- cluster_id
+      
+      # Store results
+      results_by_cluster[[as.character(cluster_id)]] <- cluster_results
+      
+      message(paste("  Successfully processed cluster", cluster_id))
+    }
+  }, error = function(e) {
+    message(paste("  Error processing cluster", cluster_id, ":", e$message))
+  })
+}
+
+# Combine cluster results
+combined_cluster_results <- bind_rows(results_by_cluster) %>%
+  mutate(cluster = as.numeric(cluster_ID))
+
+# Create output with only cluster specific features
+fold_changes_feature_value <- combined_cluster_results %>%
+  left_join(annots_list, by = "cluster") %>%
+  mutate(
+    # Match exactly the data preprocessing script logic
+    cluster_name = ifelse(!is.na(sub_lineage), sub_lineage, lineage),
+    cluster_name = gsub("/", "-", cluster_name),
+    feature_cluster = paste(cluster_name, cluster_ID, sep = "_"),
+    Feature = paste(gene, feature_cluster, sep = "@")
+  ) %>%
+  select(Feature, Value = log2FoldChange)
+
+# Write results
+write_csv(fold_changes_feature_value, "output/differential_expression/feature_fold_changes.csv")
+message("Created feature_fold_changes.csv with cluster-specific normalized log2 fold changes")
