@@ -1,4 +1,3 @@
-# Required packages
 library(dplyr)
 library(tidyr)
 library(data.table)
@@ -76,11 +75,6 @@ cut_dendrogram <- function(hc, h = NULL, min_clusters = 2, max_clusters = 6, ret
     cat(sprintf("Adjusted to %d clusters (maximum)\n", max_clusters))
   }
   
-  # Print cluster sizes
-  sizes <- table(clusters)
-  cat(sprintf("Final clusters (%d): %s\n", 
-              length(sizes), paste(sizes, collapse = ", ")))
-  
   if (return_factor) {
     return(factor(clusters))
   } else {
@@ -135,88 +129,7 @@ prepare_heatmap_data <- function(data_path, n_top_genes = 50) {
   return(as.matrix(data_matrix))
 }
 
-plot_enhanced_heatmap <- function(data_path, n_top_genes = 50, output_path = NULL) {
-  "Generate heatmap with optimized clustering for feature importance data
-  
-  Parameters:
-    data_path: Path to feature importance CSV file
-    n_top_genes: Number of top genes to include
-    output_path: Path to save heatmap (NULL to not save)
-  
-  Returns:
-    ComplexHeatmap object"
-  
-  # Prepare data
-  cat("\nProcessing file:", basename(data_path), "\n")
-  data_matrix <- prepare_heatmap_data(data_path, n_top_genes)
-  
-  # Create color scale
-  max_abs <- max(abs(data_matrix))
-  col_fun <- colorRamp2(
-    c(-max_abs, 0, max_abs),
-    c("blue", "white", "red")
-  )
-  
-  # Print matrix properties
-  cat(sprintf("Matrix dimensions: %d rows x %d columns\n", 
-              nrow(data_matrix), ncol(data_matrix)))
-  
-  # Use Manhattan distance - less sensitive to outliers
-  row_dist <- dist(data_matrix, method = "manhattan")
-  col_dist <- dist(t(data_matrix), method = "manhattan")
-  
-  # Use complete linkage - better boundary separation for feature importance
-  # Complete linkage emphasizes separation between positive/negative groups
-  row_hc <- hclust(row_dist, method = "complete")
-  col_hc <- hclust(col_dist, method = "complete")
-  
-  # Dynamically determine optimal number of clusters
-  cat("Determining optimal clusters based on dendrogram structure:\n")
-  row_clusters <- cut_dendrogram(row_hc, min_clusters = 1, max_clusters = 5)
-  col_clusters <- cut_dendrogram(col_hc, min_clusters = 1, max_clusters = 5)
-  
-  cat(sprintf("Optimal clustering: %d row clusters and %d column clusters\n", 
-              row_clusters, col_clusters))
-  
-  # Create heatmap
-  ht <- Heatmap(data_matrix,
-    name = "Feature\nImportance",
-    col = col_fun,
-    cluster_rows = row_hc,
-    cluster_columns = col_hc,
-    row_split = row_clusters,
-    column_split = col_clusters,
-    
-    show_row_names = TRUE,
-    show_column_names = TRUE,
-    column_names_rot = 45,
-    row_names_gp = gpar(fontsize = 8),
-    column_names_gp = gpar(fontsize = 8),
-    row_dend_width = unit(2, "cm"),
-    column_dend_height = unit(2, "cm")
-  )
-  
-  # Save the plot with transparent background
-  if(!is.null(output_path)) {
-    dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
-    png(output_path, width = 12, height = 10, units = "in", res = 300, bg = "transparent")
-    draw(ht, background = "transparent")
-    dev.off()
-    cat("Created:", output_path, "\n")
-  }
-  
-  return(ht)
-}
-
 create_all_heatplots <- function() {
-  "Create heatplots for all feature importance files across model types
-  
-  Searches through model directories to find and process feature importance CSV files.
-  Generates and saves heatmap visualizations for each file found.
-  
-  Returns:
-    NULL - creates heatmap files as side effect"
-  
   # Base directories
   models_base_dir <- "output/models"
   output_base_dir <- "output/figures/heatmap"
@@ -263,24 +176,326 @@ create_all_heatplots <- function() {
         file_basename <- path_file(csv_file) %>% path_ext_remove()
         message(paste0("  Processing file: ", file_basename))
         
-        output_file <- file.path(model_output_dir, 
-                                paste0("heatmap_", file_basename, ".png"))
+        # Debug print the filename for troubleshooting
+        message(paste0("  Filename for pattern matching: ", file_basename))
         
-        # Generate heatmap
+        # Default values
+        cluster_info <- "all_clusters"  # Default cluster info
+        gene_set <- "metabolic"  # Default gene set
+        
+        if (grepl("lcam_hi", file_basename, ignore.case = TRUE)) {
+          cluster_info <- "lcam_hi"
+        } else if (grepl("lcam_lo", file_basename, ignore.case = TRUE)) {
+          cluster_info <- "lcam_lo"
+        } else if (grepl("lcam_both", file_basename, ignore.case = TRUE)) {
+          cluster_info <- "lcam_both"
+        } else if (grepl("all_clusters", file_basename, ignore.case = TRUE)) {
+          cluster_info <- "all_clusters"
+        }
+        
+        # Check for nonmetabolic first (since it contains "metabolic")
+        if (grepl("nonmetabolic", file_basename, ignore.case = TRUE)) {
+          gene_set <- "nonmetabolic"
+          message("Matched nonmetabolic gene set")
+        } else if (grepl("metabolic", file_basename, ignore.case = TRUE)) {
+          gene_set <- "metabolic"
+          message("Matched metabolic gene set")
+        } else if (grepl("random", file_basename, ignore.case = TRUE)) {
+          gene_set <- "random"
+          message("Matched random gene set")
+        } else {
+          message("WARNING: No gene set matched, using default: metabolic")
+        }
+        
+        message(paste0("Using: ", cluster_info, "/", gene_set))
+        
+        # Create specific output directories
+        specific_output_dir <- file.path(model_output_dir, cluster_info, gene_set)
+        dir_create(specific_output_dir, recurse = TRUE)
+        
+        # Generate comparison heatmaps directly in the main directory
         tryCatch({
-          plot_enhanced_heatmap(
-            data_path = csv_file,
-            n_top_genes = 50,
-            output_path = output_file
+          # Clean the basename if it starts with "feature_importance_" to avoid redundancy
+          clean_basename <- file_basename
+          if (grepl("^feature_importance_", clean_basename)) {
+            clean_basename <- sub("^feature_importance_", "", clean_basename)
+          }
+          
+          # Set up the output paths
+          fi_heatmap_path <- file.path(specific_output_dir, paste0("fi_", clean_basename, ".png"))
+          fc_heatmap_path <- file.path(specific_output_dir, paste0("fc_", clean_basename, ".png"))
+          ratio_heatmap_path <- file.path(specific_output_dir, paste0("ratio_", clean_basename, ".png"))
+          
+          # Load fold change data
+          fc_data <- load_fold_changes()
+          fold_changes <- fc_data$fold_changes
+          gene_fc <- fc_data$gene_fc
+          
+          # Prepare feature importance data
+          message("Loading feature importance data...")
+          feature_matrix <- prepare_heatmap_data(csv_file, n_top_genes = 50)
+          
+          # Create fold change matrix matching feature matrix structure
+          fc_matrix <- matrix(0, nrow = nrow(feature_matrix), ncol = ncol(feature_matrix))
+          rownames(fc_matrix) <- rownames(feature_matrix)
+          colnames(fc_matrix) <- colnames(feature_matrix)
+          
+          # ALSO CREATE RATIO MATRIX - add these lines
+          ratio_matrix <- matrix(0, nrow = nrow(feature_matrix), ncol = ncol(feature_matrix))
+          rownames(ratio_matrix) <- rownames(feature_matrix)
+          colnames(ratio_matrix) <- colnames(feature_matrix)
+          
+          # Populate with matching fold changes
+          for (i in 1:nrow(feature_matrix)) {
+            for (j in 1:ncol(feature_matrix)) {
+              gene <- rownames(feature_matrix)[i]
+              cluster <- colnames(feature_matrix)[j]
+              feature_key <- paste0(gene, "@", cluster)
+              
+              # Try to find exact feature match
+              fc_match <- fold_changes[Feature == feature_key]
+              
+              if (nrow(fc_match) > 0) {
+                fc_matrix[i,j] <- fc_match$Value
+              } else {
+                # Fall back to gene-level fold change
+                gene_match <- gene_fc[gene == gene]
+                if (nrow(gene_match) > 0) {
+                  fc_matrix[i,j] <- gene_match$value
+                } else {
+                  # Default to small value if no match found
+                  fc_matrix[i,j] <- 0.1
+                }
+              }
+            }
+          }
+          
+          # Print diagnostic info
+          cat(sprintf("FC matrix range: [%.4f, %.4f]\n", min(fc_matrix), max(fc_matrix)))
+          
+          # Calculate clustering
+          row_dist <- dist(feature_matrix, method = "manhattan")
+          col_dist <- dist(t(feature_matrix), method = "manhattan")
+          row_hc <- hclust(row_dist, method = "complete")
+          col_hc <- hclust(col_dist, method = "complete")
+          row_clusters <- cut_dendrogram(row_hc, min_clusters = 1, max_clusters = 5, return_factor = FALSE)
+          col_clusters <- cut_dendrogram(col_hc, min_clusters = 1, max_clusters = 5, return_factor = FALSE)
+          
+          # 1. FEATURE IMPORTANCE HEATMAP
+          # Get max value to share with ratio heatmap
+          fi_max <- max(abs(feature_matrix))
+          
+          plot_matrix_heatmap(
+            data_matrix = feature_matrix,
+            title = "Feature\nImportance",
+            row_hc = row_hc,
+            col_hc = col_hc,
+            row_clusters = row_clusters,
+            col_clusters = col_clusters,
+            output_path = fi_heatmap_path,
+            fixed_max = fi_max  # Pass the max value
           )
+          
+          # 2. FOLD CHANGE HEATMAP - keep its own scale
+          plot_matrix_heatmap(
+            data_matrix = fc_matrix,
+            title = "Log2 Fold\nChange",
+            row_hc = row_hc,
+            col_hc = col_hc,
+            row_clusters = row_clusters,
+            col_clusters = col_clusters,
+            output_path = fc_heatmap_path
+            # No fixed_max, uses its own scale
+          )
+          
+          # Replace the ratio calculation with a true ratio approach
+          for (i in 1:nrow(feature_matrix)) {
+            for (j in 1:ncol(feature_matrix)) {
+              fi_value <- feature_matrix[i,j]
+              fc_value <- fc_matrix[i,j]
+              
+              # Convert log2 fold change to regular fold change
+              # Add small offset to avoid division issues
+              epsilon <- 0.01
+              
+              # Use absolute value of importance
+              abs_importance <- abs(fi_value)
+              
+              # Calculate regular fold change (distance from 1)
+              # When log2FC is 0, regular FC is 1, so we use abs(2^fc_value - 1)
+              reg_fc_distance <- abs(2^abs(fc_value) - 1) + epsilon
+              
+              # Ratio: importance per unit of fold change
+              if (abs_importance > 0) {
+                ratio_matrix[i,j] <- abs_importance / reg_fc_distance
+              } else {
+                ratio_matrix[i,j] <- 0  # No importance = no ratio
+              }
+              
+              # Keep sign from original importance
+              if (fi_value < 0) {
+                ratio_matrix[i,j] <- -ratio_matrix[i,j]
+              }
+            }
+          }
+          
+          # Change the title to match the calculation
+          plot_matrix_heatmap(
+            data_matrix = ratio_matrix,
+            title = "Importance to\nFold Change Ratio",
+            row_hc = row_hc,
+            col_hc = col_hc,
+            row_clusters = row_clusters,
+            col_clusters = col_clusters,
+            output_path = ratio_heatmap_path,
+            fixed_max = max(abs(ratio_matrix))  # Use ratio-specific scaling
+          )
+          
+          # Add Option 3 as a FOURTH heatmap (Key Features highlight)
+          highlight_matrix <- matrix(0, nrow = nrow(feature_matrix), ncol = ncol(feature_matrix))
+          rownames(highlight_matrix) <- rownames(feature_matrix)
+          colnames(highlight_matrix) <- colnames(feature_matrix)
+          
+          # Set thresholds safely
+          if(sum(abs(feature_matrix) > 0) >= 4 && sum(abs(fc_matrix) > 0) >= 4) {
+            threshold_importance <- quantile(abs(feature_matrix)[abs(feature_matrix) > 0], 0.75)  # Top 25% of importance
+            threshold_fold_change <- quantile(abs(fc_matrix)[abs(fc_matrix) > 0], 0.25)     # Bottom 25% of fold change
+          } else {
+            threshold_importance <- max(abs(feature_matrix)) * 0.5
+            threshold_fold_change <- max(abs(fc_matrix)) * 0.25
+          }
+          
+          # Populate highlight matrix
+          for (i in 1:nrow(feature_matrix)) {
+            for (j in 1:ncol(feature_matrix)) {
+              fi_value <- feature_matrix[i,j]
+              fc_value <- fc_matrix[i,j]
+              
+              # Highlight where importance is high but fold change is low
+              if (abs(fi_value) >= threshold_importance && abs(fc_value) <= threshold_fold_change) {
+                highlight_matrix[i,j] <- fi_value  # Use importance value for highlighted cells
+              } else {
+                highlight_matrix[i,j] <- 0  # Others get zero
+              }
+            }
+          }
+          
+          # Set up the output path for the highlight heatmap
+          highlight_heatmap_path <- file.path(specific_output_dir, paste0("highlight_", clean_basename, ".png"))
+          
+          # 4. HIGHLIGHT HEATMAP - show key features
+          plot_matrix_heatmap(
+            data_matrix = highlight_matrix,
+            title = "Key Features:\nHigh Importance,\nLow Fold Change",
+            row_hc = row_hc,
+            col_hc = col_hc,
+            row_clusters = row_clusters,
+            col_clusters = col_clusters,
+            output_path = highlight_heatmap_path,
+            fixed_max = fi_max  # Use same max as feature importance
+          )
+          
         }, error = function(e) {
-          message(paste0("   Error processing ", file_basename, ": ", e$message))
+          message(paste0("   Error processing heatmaps: ", e$message))
         })
       }
     }
   }
   
   message("Heatplot generation complete.")
+}
+
+# Fast fold change loading with data.table for performance
+load_fold_changes <- function() {
+  "Load fold change data efficiently using data.table
+  
+  Loads and processes fold change data from the standard output file.
+  Optimizes for performance using data.table indexing.
+  
+  Returns:
+    A list containing:
+      - fold_changes: Data table with all fold change entries
+      - gene_fc: Data table with gene-level fold changes
+      - has_clusters: Boolean indicating if cluster-specific fold changes exist"
+  
+  fold_changes_path <- "output/differential_expression/feature_fold_changes.csv"
+  if (!file.exists(fold_changes_path)) {
+    stop("Fold change file not found at: ", fold_changes_path)
+  }
+  
+  # Load fold change data
+  message("Loading fold change data...")
+  fold_changes <- fread(fold_changes_path, key="Feature")  # Set key for indexing
+  message("Loaded ", nrow(fold_changes), " fold change entries")
+  
+  # Extract gene-level fold changes 
+  gene_fc <- fold_changes[!grepl("@", Feature), .(gene = Feature, value = Value)]
+  setkey(gene_fc, gene)  # Index for fast lookups
+  
+  # Return data.tables directly for fastest lookup performance
+  message("Fold change mapping ready")
+  return(list(
+    fold_changes = fold_changes,
+    gene_fc = gene_fc,
+    has_clusters = any(grepl("@", fold_changes$Feature))
+  ))
+}
+
+# Helper function for plotting heatmaps with consistent settings
+plot_matrix_heatmap <- function(data_matrix, title, row_hc, col_hc, row_clusters, col_clusters, 
+                              output_path = NULL, right_annotation = NULL, fixed_max = NULL) {
+  "Create a standardized heatmap visualization with consistent formatting
+  
+  Parameters:
+    data_matrix: Numeric matrix to visualize
+    title: Title for the heatmap legend
+    row_hc: Hierarchical clustering object for rows
+    col_hc: Hierarchical clustering object for columns
+    row_clusters: Number of row clusters for splitting
+    col_clusters: Number of column clusters for splitting
+    output_path: Path to save the heatmap image (NULL to not save)
+    right_annotation: Optional annotation to display at the right side
+    fixed_max: Optional fixed maximum value for color scaling
+    
+  Returns:
+    ComplexHeatmap object"
+  
+  # Use provided max or calculate from data
+  max_abs <- if(!is.null(fixed_max)) fixed_max else max(abs(data_matrix))
+  
+  col_fun <- colorRamp2(
+    c(-max_abs, 0, max_abs),
+    c("blue", "white", "red")
+  )
+  
+  # Create heatmap
+  ht <- Heatmap(data_matrix,
+    name = title,
+    col = col_fun,
+    cluster_rows = row_hc,
+    cluster_columns = col_hc,
+    row_split = row_clusters,
+    column_split = col_clusters,
+    right_annotation = right_annotation,
+    show_row_names = TRUE,
+    show_column_names = TRUE,
+    column_names_rot = 45,
+    row_names_gp = gpar(fontsize = 8),
+    column_names_gp = gpar(fontsize = 8),
+    row_dend_width = unit(2, "cm"),
+    column_dend_height = unit(2, "cm")
+  )
+  
+  # Save the plot with transparent background
+  if(!is.null(output_path)) {
+    dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
+    png(output_path, width = 12, height = 10, units = "in", res = 300, bg = "transparent")
+    draw(ht, background = "transparent")
+    dev.off()
+    cat("Created:", output_path, "\n")
+  }
+  
+  return(ht)
 }
 
 # Run the function
