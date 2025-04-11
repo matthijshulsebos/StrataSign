@@ -22,7 +22,7 @@ pathway_info <- keggGet("hsa01100")
 related_pathways <- names(pathway_info[[1]]$REL_PATHWAY)
 
 # Write sub-pathways to file for confirmation
-sink("src_output/rel_pathways.txt")
+sink("output/kegg/rel_pathways.txt")
 print(related_pathways)
 sink()
 
@@ -36,7 +36,7 @@ mapped_metabolic_genes <- map_entrez_to_symbols(genes)
 cat("Total unique genes related to hsa01100:", length(genes), "\n")
 write.csv(
   mapped_metabolic_genes,
-  file = "src_output/hsa01100_genes.csv",
+  file = "output/kegg/hsa01100_genes.csv",
   row.names = FALSE
 )
 cat("Genes saved to 'hsa01100_genes.txt'.\n")

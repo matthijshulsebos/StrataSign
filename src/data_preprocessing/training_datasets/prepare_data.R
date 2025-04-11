@@ -132,7 +132,7 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
     left_join(cluster_proportions, by = c("sample_ID", "cluster_ID")) %>%
     # Add a check for missing cluster proportions
     mutate(
-      # Default to 1 if cluster_proportion is NA (no matching data)
+      # Default to 1 if cluster_proportion is NA
       cluster_proportion = ifelse(is.na(cluster_proportion), 1, cluster_proportion),
       # Correct for over/under-representation by dividing by cluster proportion
       normalized_count = sample_normalized_count / cluster_proportion
@@ -148,13 +148,13 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
     select(-total_sample_counts, -cluster_cell_count, -total_cells, -cluster_proportion, -cluster_ID, -total_after_norm)
 
   # Check final normalization
-  final_norm_check <- counts_long %>% 
-    group_by(sample_ID) %>% 
-    summarize(total = sum(normalized_count), 
+  final_norm_check <- counts_long %>%
+    group_by(sample_ID) %>%
+    summarize(total = sum(normalized_count),
               expected = mean_sample_size,
               diff = abs(total - expected)) %>%
     ungroup()
-  message("Final normalization check - max difference from expected: ", 
+  message("Final normalization check, max difference from expected: ", 
           round(max(final_norm_check$diff), 6),
           ", mean: ", round(mean(final_norm_check$diff), 6))
 
@@ -162,12 +162,12 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
   counts_long <- counts_long %>%
     mutate(log_normalized_count = log1p(normalized_count))
 
-  # Check log transformation stats
+  # Output log transformation stats
   log_stats <- summarize(counts_long, 
                          min_val = min(log_normalized_count),
                          mean_val = mean(log_normalized_count), 
                          max_val = max(log_normalized_count))
-  message("Log transform stats - min: ", round(log_stats$min_val, 4),
+  message("Log transform stats, min: ", round(log_stats$min_val, 4),
           ", mean: ", round(log_stats$mean_val, 4), 
           ", max: ", round(log_stats$max_val, 4))
 
@@ -176,7 +176,7 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
     select(sample_ID, gene_cluster, log_normalized_count) %>%
     pivot_wider(names_from = gene_cluster, values_from = log_normalized_count, values_fill = list(log_normalized_count = 0))
 
-  # Merge with metadata - but only keep essential columns
+  # Merge with metadata but only keep essential columns
   counts_wide <- counts_wide %>% 
     mutate(sample_ID = as.character(sample_ID)) %>%
     left_join(
