@@ -157,7 +157,7 @@ create_all_heatplots <- function() {
                           fail = FALSE)
     
     if (length(feature_dirs) == 0) {
-      message(paste0("  No feature importance directories found for ", model_type))
+      message(paste0("No feature importance directories found for ", model_type))
       next
     }
     
@@ -167,17 +167,17 @@ create_all_heatplots <- function() {
       csv_files <- dir_ls(feat_dir, regexp = "\\.csv$", fail = FALSE)
       
       if (length(csv_files) == 0) {
-        message(paste0("  No CSV files found in ", feat_dir))
+        message(paste0("No CSV files found in ", feat_dir))
         next
       }
       
       # Process each file
       for (csv_file in csv_files) {
         file_basename <- path_file(csv_file) %>% path_ext_remove()
-        message(paste0("  Processing file: ", file_basename))
+        message(paste0("Processing file: ", file_basename))
         
         # Debug print the filename for troubleshooting
-        message(paste0("  Filename for pattern matching: ", file_basename))
+        message(paste0("Filename for pattern matching: ", file_basename))
         
         # Default values
         cluster_info <- "all_clusters"  # Default cluster info
@@ -273,6 +273,46 @@ create_all_heatplots <- function() {
           # Print diagnostic info
           cat(sprintf("FC matrix range: [%.4f, %.4f]\n", min(fc_matrix), max(fc_matrix)))
           
+          # Replace the ratio calculation with a properly centered fold change distance
+          # Calculate ratio matrices with much stronger fold change penalty
+          for (i in 1:nrow(feature_matrix)) {
+            for (j in 1:ncol(feature_matrix)) {
+              fi_value <- feature_matrix[i,j]
+              fc_value <- fc_matrix[i,j]  # This is log2 fold change
+              
+              # Use absolute value of importance
+              abs_importance <- abs(fi_value)
+              
+              # For no importance, ratio is zero
+              if (abs_importance == 0) {
+                ratio_matrix[i,j] <- 0
+                next
+              }
+              
+              # Convert log2FC to regular FC
+              reg_fc <- 2^fc_value
+              
+              # Calculate distance from 1 (unchanged)
+              distance <- max(reg_fc, 1/reg_fc)
+              
+              # Calculate exponential decay scaling factor
+              # This creates a smooth curve through the same approximate points as the step function
+              scaling_factor <- exp(-5 * (distance - 1)^2)
+              
+              # Ensure minimum of 0.01 (1%) for very large fold changes
+              scaling_factor <- max(0.01, scaling_factor)
+              
+              # Apply the scaling factor directly
+              ratio_matrix[i,j] <- fi_value * scaling_factor
+            }
+          }
+          
+          # Add diagnostic print statements
+          cat(sprintf("Feature matrix range: [%.2e, %.2e]\n", min(feature_matrix), max(feature_matrix)))
+          cat(sprintf("Ratio matrix range: [%.2e, %.2e]\n", min(ratio_matrix), max(ratio_matrix)))
+          cat(sprintf("Fold changes distribution: min=%.2f, median=%.2f, mean=%.2f, max=%.2f\n", 
+                     min(abs(fc_matrix)), median(abs(fc_matrix)), mean(abs(fc_matrix)), max(abs(fc_matrix))))
+          
           # Calculate clustering
           row_dist <- dist(feature_matrix, method = "manhattan")
           col_dist <- dist(t(feature_matrix), method = "manhattan")
@@ -308,37 +348,6 @@ create_all_heatplots <- function() {
             # No fixed_max, uses its own scale
           )
           
-          # Replace the ratio calculation with a true ratio approach
-          for (i in 1:nrow(feature_matrix)) {
-            for (j in 1:ncol(feature_matrix)) {
-              fi_value <- feature_matrix[i,j]
-              fc_value <- fc_matrix[i,j]
-              
-              # Convert log2 fold change to regular fold change
-              # Add small offset to avoid division issues
-              epsilon <- 0.01
-              
-              # Use absolute value of importance
-              abs_importance <- abs(fi_value)
-              
-              # Calculate regular fold change (distance from 1)
-              # When log2FC is 0, regular FC is 1, so we use abs(2^fc_value - 1)
-              reg_fc_distance <- abs(2^abs(fc_value) - 1) + epsilon
-              
-              # Ratio: importance per unit of fold change
-              if (abs_importance > 0) {
-                ratio_matrix[i,j] <- abs_importance / reg_fc_distance
-              } else {
-                ratio_matrix[i,j] <- 0  # No importance = no ratio
-              }
-              
-              # Keep sign from original importance
-              if (fi_value < 0) {
-                ratio_matrix[i,j] <- -ratio_matrix[i,j]
-              }
-            }
-          }
-          
           # Change the title to match the calculation
           plot_matrix_heatmap(
             data_matrix = ratio_matrix,
@@ -348,7 +357,7 @@ create_all_heatplots <- function() {
             row_clusters = row_clusters,
             col_clusters = col_clusters,
             output_path = ratio_heatmap_path,
-            fixed_max = max(abs(ratio_matrix))  # Use ratio-specific scaling
+            fixed_max = fi_max  # Use the SAME max as feature importance instead of ratio-specific scaling
           )
           
           # Add Option 3 as a FOURTH heatmap (Key Features highlight)
@@ -468,7 +477,7 @@ plot_matrix_heatmap <- function(data_matrix, title, row_hc, col_hc, row_clusters
     c("blue", "white", "red")
   )
   
-  # Create heatmap
+  # Create heatmap with compatible parameters
   ht <- Heatmap(data_matrix,
     name = title,
     col = col_fun,
@@ -483,7 +492,11 @@ plot_matrix_heatmap <- function(data_matrix, title, row_hc, col_hc, row_clusters
     row_names_gp = gpar(fontsize = 8),
     column_names_gp = gpar(fontsize = 8),
     row_dend_width = unit(2, "cm"),
-    column_dend_height = unit(2, "cm")
+    column_dend_height = unit(2, "cm"),
+    # Use basic border parameters that work with older ComplexHeatmap versions
+    gap = unit(1.5, "mm"),
+    border = TRUE,
+    border_gp = gpar(lwd = 0.8)
   )
   
   # Save the plot with transparent background
