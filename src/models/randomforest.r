@@ -78,48 +78,89 @@ for (dataset_name in names(datasets)) {
     y_test <- fread(datasets[[dataset_name]][[version]]$y_test)
     metadata <- fread(datasets[[dataset_name]][[version]]$metadata)
 
-    # Ensure proper label encoding
-    y_train$x <- factor(y_train$x, levels = c("Normal", "Tumor"), labels = c(0, 1))
-    y_test$x <- factor(y_test$x, levels = c("Normal", "Tumor"), labels = c(0, 1))
-    
-    # Convert to numeric for model fitting
-    y_train_numeric <- as.numeric(as.character(y_train$x))
-    y_test_numeric <- as.numeric(as.character(y_test$x))
+    # Ensure proper label encoding - keep as "Normal" and "Tumor" 
+    y_train$x <- factor(y_train$x, levels = c("Normal", "Tumor"))
+    y_test$x <- factor(y_test$x, levels = c("Normal", "Tumor"))
     
     # Remove constant/zero-variance columns
     nzv <- nearZeroVar(X_train, saveMetrics = TRUE)
     X_train <- X_train[, !nzv$zeroVar, with = FALSE]
     X_test <- X_test[, !nzv$zeroVar, with = FALSE]
     
-    # Train random forest model with regularization parameters
-    print("Training Random Forest model...")
-    set.seed(42)  # For reproducibility
+    # Tune hyperparameters using cross-validation
+    print("Tuning RandomForest hyperparameters...")
+    set.seed(42)
+
+    # Define the tuning grid for ranger
+    tuning_grid <- expand.grid(
+      mtry = c(floor(sqrt(ncol(X_train))), floor(ncol(X_train)/3), floor(ncol(X_train)/2)),
+      splitrule = "gini",  # Required for ranger
+      min.node.size = c(1, 3, 5)
+    )
+
+    # Define control parameters for tuning
+    control <- trainControl(
+      method = "cv",
+      number = 5,
+      classProbs = TRUE,
+      summaryFunction = twoClassSummary,
+      verboseIter = TRUE
+    )
+
+    X_tune <- X_train
+    y_tune <- y_train$x
+
+    # Tune model with ranger 
+    rf_tune <- train(
+      x = as.matrix(X_tune),
+      y = y_tune,
+      method = "ranger",
+      num.trees = 200,
+      importance = "permutation",
+      tuneGrid = tuning_grid,
+      trControl = control,
+      metric = "ROC",
+      replace = TRUE,
+      sample.fraction = 0.7  # Fixed sample fraction
+    )
+
+    # Get best parameters
+    print("Best tuning parameters:")
+    print(rf_tune$bestTune)
+
+    # Use best parameters for final model
+    best_mtry <- rf_tune$bestTune$mtry
+    best_node_size <- rf_tune$bestTune$min.node.size
+    best_sample_fraction <- 0.7  # Use the same value defined in train() call
+
+    # Train final model with best parameters
+    print("Training final RandomForest with optimized parameters...")
     rf_fit <- randomForest(
       x = as.matrix(X_train),
-      y = factor(y_train_numeric, levels = c(0, 1)),
-      ntree = 1000,                      # More trees for stability
-      mtry = max(5, floor(ncol(X_train)/3)),  # Try more features per split
-      nodesize = 1,                      # Allow smaller leaf nodes
-      importance = TRUE,                 # Calculate variable importance
-      sampsize = nrow(X_train),          # Don't subsample (use all training data)
-      replace = TRUE                     # Bootstrap samples
+      y = y_train$x,  # Use original factor with "Normal"/"Tumor" levels
+      ntree = 500,
+      mtry = best_mtry,
+      nodesize = best_node_size,
+      sampsize = round(best_sample_fraction * nrow(X_train)),
+      importance = TRUE,
+      replace = TRUE
     )
     
     # Make predictions
-    y_prob <- predict(rf_fit, newdata = as.matrix(X_test), type = "prob")[, "1"]
-    y_pred <- ifelse(y_prob > 0.5, 1, 0)
+    y_prob <- predict(rf_fit, newdata = as.matrix(X_test), type = "prob")[, "Tumor"]
+    y_pred <- ifelse(y_prob > 0.5, "Tumor", "Normal")
+    y_pred <- factor(y_pred, levels = c("Normal", "Tumor"))
     
     # Ensure factors have the same levels for confusion matrix
-    y_pred <- factor(y_pred, levels = c(0, 1))
-    y_test_factor <- factor(y_test_numeric, levels = c(0, 1))
+    y_test_factor <- factor(y_test$x, levels = c("Normal", "Tumor"))
     
     # Calculate performance metrics
-    confusion <- confusionMatrix(y_pred, y_test_factor)
+    confusion <- confusionMatrix(y_pred, y_test$x)
     accuracy <- confusion$overall["Accuracy"]
     precision <- confusion$byClass["Pos Pred Value"]
     recall <- confusion$byClass["Sensitivity"]
     f1_score <- 2 * (precision * recall) / (precision + recall)
-    roc_auc <- as.numeric(roc(y_test_numeric, y_prob)$auc)
+    roc_auc <- as.numeric(roc(y_test$x == "Tumor", y_prob)$auc)
     
     # Store performance metrics
     performance_summary <- performance_summary %>% 

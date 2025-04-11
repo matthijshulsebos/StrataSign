@@ -190,6 +190,21 @@ for (dataset_name in names(datasets)) {
     feature_values <- as.numeric(original_feature_contributions_rbf[1,])
     feature_names <- colnames(original_feature_contributions_rbf)
 
+    # Sort features by absolute importance
+    sorted_idx <- order(abs(feature_values), decreasing = TRUE)
+
+    # Keep only top 500 features
+    keep_top <- 500
+    if (length(sorted_idx) > keep_top) {
+      keep_mask <- rep(FALSE, length(feature_values))
+      keep_mask[sorted_idx[1:keep_top]] <- TRUE
+      feature_values[!keep_mask] <- 0
+      
+      # Report stats
+      message(paste0("Keeping top ", keep_top, " features (", 
+                    round(keep_top/length(feature_values)*100, 1), "% of total)"))
+    }
+
     # Create dataframe with raw contributions
     feature_importance_raw <- tibble(
       Feature = feature_names,
