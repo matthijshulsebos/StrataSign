@@ -7,6 +7,20 @@ library(Matrix)
 # Create output directory
 dir.create("output/differential_expression", recursive = TRUE, showWarnings = FALSE)
 
+# Check for required files
+required_files <- c(
+  "base/data/lung_ldm.rd",
+  "base/input_tables/table_s1_sample_table.csv",
+  "base/input_tables/annots_list.csv",
+  "base/input_tables/cell_metadata.csv"
+)
+
+for (file_path in required_files) {
+  if (!file.exists(file_path)) {
+    stop(paste("Required input file missing:", file_path))
+  }
+}
+
 # Load Leader et al. data
 if (!exists("lung_ldm")) {
   load("base/data/lung_ldm.rd")
@@ -17,18 +31,28 @@ table_s1 <- read_csv("base/input_tables/table_s1_sample_table.csv")
 annots_list <- read_csv("base/input_tables/annots_list.csv")
 cell_metadata <- read_csv("base/input_tables/cell_metadata.csv") # Added cell metadata
 
+# Check if annots_list has the expected "cluster" column
+if (!"cluster" %in% colnames(annots_list)) {
+  stop("Required column 'cluster' missing in annots_list.csv")
+}
+
 # Filter samples to those used in the clustering model 
 table_s1 <- table_s1 %>% 
   filter(Use.in.Clustering.Model. == "Yes") %>%
   filter(!is.na(tissue)) %>%
   mutate(tissue = toupper(tissue))
 
+# Validate we have sufficient samples after filtering
+if (nrow(table_s1) < 5) {
+  stop("Too few samples remain after filtering. Check input data.")
+}
+
 # Define doublet clusters to exclude
 clusters_to_exclude <- c(3, 4, 6, 12, 15, 21, 22, 24, 26, 27, 60)
 
 # Prepare count data
 counts <- lung_ldm$dataset$counts
- 
+
 # Filter out doublets
 all_clusters <- as.numeric(dimnames(counts)[[3]])
 clusters_to_keep <- all_clusters[!all_clusters %in% clusters_to_exclude]
@@ -37,6 +61,12 @@ counts <- counts[, , as.character(clusters_to_keep), drop = FALSE]
 # Filter samples to match table_s1
 sample_ids_to_keep <- table_s1 %>% pull(sample_ID)
 counts <- counts[dimnames(counts)[[1]] %in% sample_ids_to_keep, , , drop = FALSE]
+
+# Validate remaining data
+if (length(dim(counts)[1]) == 0 || dim(counts)[1] == 0) {
+  stop("No samples remain after filtering. Check sample IDs in metadata and count data.")
+}
+message(paste("Processing", dim(counts)[1], "samples across", dim(counts)[3], "clusters"))
 
 # Calculate cluster proportions
 message("Calculating cell type proportions for normalization...")
@@ -53,10 +83,15 @@ cluster_proportions <- cell_metadata %>%
          cluster_proportion = cluster_cell_count / total_cells) %>%
   ungroup()
 
-# Set reference (normal) and comparison (tumor) levels
-unique_tissues <- sort(unique(table_s1$tissue))
-ref_level <- unique_tissues[1]
-comparison_level <- unique_tissues[2]
+# Set reference (normal) and comparison (tumor) levels explicitly
+ref_level <- "NORMAL"
+comparison_level <- "TUMOR"
+
+# Validate that these tissues exist in our data
+if (!all(c(ref_level, comparison_level) %in% table_s1$tissue)) {
+  stop(paste("Expected tissue types", ref_level, "and", comparison_level, 
+             "but found:", paste(unique(table_s1$tissue), collapse=", ")))
+}
 
 # Create sample metadata
 sample_metadata <- table_s1 %>%
@@ -64,7 +99,7 @@ sample_metadata <- table_s1 %>%
   filter(sample_ID %in% rownames(counts)) %>%
   mutate(
     condition = tissue,
-    condition = factor(condition, levels = unique_tissues)
+    condition = factor(condition, levels = c(ref_level, comparison_level))
   ) %>%
   column_to_rownames("sample_ID")
 
@@ -81,22 +116,30 @@ process_counts <- function(count_matrix, sample_metadata, dataset_name, cluster_
   # Add condition information
   counts_long$condition <- sample_metadata[counts_long$sample_ID, "condition"]
   
-  # Filter genes with low counts
+  # REMOVED: Filter genes with low counts
+  # Instead, just track how many zero-count genes we have
   gene_totals <- counts_long %>%
     group_by(gene) %>%
-    summarize(total_count = sum(count), .groups = 'drop')
+    summarize(
+      total_count = sum(count),
+      zero_count_samples = sum(count == 0),
+      .groups = 'drop'
+    )
   
-  genes_to_keep <- gene_totals %>%
-    filter(total_count >= 10) %>%
-    pull(gene)
+  # Only report the gene filtering statistics but don't actually filter
+  low_expr_genes <- sum(gene_totals$total_count < 10)
+  total_genes <- nrow(gene_totals)
+  if (low_expr_genes > 0) {
+    message(paste("  Note:", dataset_name, "has", low_expr_genes, "genes with count < 10 out of", total_genes, "total genes"))
+  }
   
-  if (length(genes_to_keep) < 10) {
-    message(paste("  Skipping", dataset_name, "- too few genes after filtering"))
+  # Skip only if we have too few genes total
+  if (total_genes < 10) {
+    message(paste("  Skipping", dataset_name, "- too few genes total"))
     return(NULL)
   }
   
-  counts_long <- counts_long %>% filter(gene %in% genes_to_keep)
-  
+  # Rest of the function remains the same
   # Calculate mean sample size for normalization
   mean_sample_size <- counts_long %>%
     group_by(sample_ID) %>%
@@ -104,34 +147,31 @@ process_counts <- function(count_matrix, sample_metadata, dataset_name, cluster_
     summarize(mean_size = mean(sample_size)) %>%
     pull(mean_size)
   
-  # Normalize counts by total sample counts
+  # Get cluster-specific proportion information for this cluster
+  cluster_props <- cluster_proportions %>%
+    filter(cluster_ID == as.character(cluster_id)) %>%
+    select(sample_ID, cluster_proportion)
+  
+  # Normalize counts by total sample counts first (CPM normalization)
   normalized_counts <- counts_long %>%
     group_by(sample_ID) %>%
     mutate(
       total_sample_counts = sum(count),
-      sample_normalized_count = (count / total_sample_counts) * mean_sample_size,
-      normalized_count = sample_normalized_count
+      normalized_count = (count / total_sample_counts) * mean_sample_size
     ) %>%
     ungroup()
   
-  # Apply cell type proportion normalization for cluster-specific analysis
-  cluster_id_str <- as.character(cluster_id)
-  
+  # Apply cluster proportion correction
   normalized_counts <- normalized_counts %>%
-    # Add cluster_ID column for joining with cluster_proportions
-    mutate(cluster_ID = cluster_id_str) %>%
-    left_join(
-      cluster_proportions %>% 
-        filter(cluster_ID == cluster_id_str),
-      by = c("sample_ID", "cluster_ID")
-    ) %>%
+    left_join(cluster_props, by = "sample_ID") %>%
     mutate(
-      # Default to 1 if cluster_proportion is NA (no matching data)
-      cluster_proportion = ifelse(is.na(cluster_proportion), 1, cluster_proportion),
-      # Correct for over/under-representation by dividing by cluster proportion
-      normalized_count = sample_normalized_count / cluster_proportion
+      # Default to 1 if cluster_proportion is NA or too small
+      cluster_proportion = ifelse(is.na(cluster_proportion) | cluster_proportion < 0.001, 
+                                 1, cluster_proportion),
+      # Correct for over/under-representation
+      normalized_count = normalized_count / cluster_proportion
     ) %>%
-    # Re-normalize to maintain the same total counts per sample
+    # Re-normalize to maintain the same total counts
     group_by(sample_ID) %>%
     mutate(
       total_after_norm = sum(normalized_count),
@@ -139,26 +179,28 @@ process_counts <- function(count_matrix, sample_metadata, dataset_name, cluster_
     ) %>%
     ungroup()
   
-  # Calculate log-normalized counts
-  normalized_counts <- normalized_counts %>%
-    mutate(log_normalized_count = log1p(normalized_count))
-  
   # Calculate mean expression by condition
   condition_means <- normalized_counts %>%
     group_by(gene, condition) %>%
     summarize(
-      mean_log_expr = mean(log_normalized_count),
+      mean_expr = mean(normalized_count),
+      n_samples = n(),
       .groups = 'drop'
     ) %>%
     pivot_wider(
       names_from = condition, 
-      values_from = mean_log_expr
+      values_from = c(mean_expr, n_samples)
     )
   
   # Calculate log2 fold changes
   result_df <- condition_means %>%
     mutate(
-      log2FoldChange = log2((exp(.data[[comparison_level]]) + 1) / (exp(.data[[ref_level]]) + 1))
+      # Using explicit column names
+      mean_expr_normal = get(paste0("mean_expr_", ref_level)),
+      mean_expr_tumor = get(paste0("mean_expr_", comparison_level)),
+      log2FoldChange = log2((mean_expr_tumor + 1) / (mean_expr_normal + 1)),
+      n_normal = get(paste0("n_samples_", ref_level)),
+      n_tumor = get(paste0("n_samples_", comparison_level))
     )
   
   return(result_df)
@@ -167,9 +209,11 @@ process_counts <- function(count_matrix, sample_metadata, dataset_name, cluster_
 # Process individual clusters
 results_by_cluster <- list()
 message("Processing clusters with normalized fold change approach...")
+clusters_processed <- 0
+clusters_skipped <- 0
 
 for (cluster_id in clusters_to_keep) {
-  message(paste("Processing cluster", cluster_id))
+  message(paste("Processing cluster:", cluster_id))
   
   # Get counts for this cluster
   cluster_counts <- counts[, , as.character(cluster_id)]
@@ -177,7 +221,8 @@ for (cluster_id in clusters_to_keep) {
   
   # Skip clusters with too few samples
   if (length(common_samples) < 10) {
-    message(paste("  Skipping cluster", cluster_id, "- too few samples"))
+    message(paste("  Skipping cluster:", cluster_id, "- too few samples"))
+    clusters_skipped <- clusters_skipped + 1
     next
   }
   
@@ -189,6 +234,7 @@ for (cluster_id in clusters_to_keep) {
   condition_counts <- table(sample_metadata_ordered$condition)
   if (length(condition_counts) < 2 || any(condition_counts < 3)) {
     message(paste("  Skipping cluster", cluster_id, "- insufficient samples per condition"))
+    clusters_skipped <- clusters_skipped + 1
     next
   }
   
@@ -204,11 +250,20 @@ for (cluster_id in clusters_to_keep) {
       # Store results
       results_by_cluster[[as.character(cluster_id)]] <- cluster_results
       
-      message(paste("  Successfully processed cluster", cluster_id))
+      message(paste("Successfully processed cluster", cluster_id))
+      clusters_processed <- clusters_processed + 1
+    } else {
+      clusters_skipped <- clusters_skipped + 1
     }
   }, error = function(e) {
     message(paste("  Error processing cluster", cluster_id, ":", e$message))
+    clusters_skipped <- clusters_skipped + 1
   })
+}
+
+# Check if we processed any clusters
+if (length(results_by_cluster) == 0) {
+  stop("No clusters were successfully processed. Check filtering criteria and input data.")
 }
 
 # Combine cluster results
@@ -229,4 +284,22 @@ fold_changes_feature_value <- combined_cluster_results %>%
 
 # Write results
 write_csv(fold_changes_feature_value, "output/differential_expression/feature_fold_changes.csv")
+
+# Write a more detailed results file with additional information
+detailed_results <- combined_cluster_results %>%
+  left_join(annots_list, by = "cluster") %>%
+  mutate(
+    cluster_name = ifelse(!is.na(sub_lineage), sub_lineage, lineage),
+    cluster_name = gsub("/", "-", cluster_name),
+    feature_cluster = paste(cluster_name, cluster_ID, sep = "_"),
+    Feature = paste(gene, feature_cluster, sep = "@")
+  )
+
+write_csv(detailed_results, "output/differential_expression/detailed_feature_fold_changes.csv")
+
+# Print summary statistics
+message(paste("Processed", clusters_processed, "clusters successfully"))
+message(paste("Skipped", clusters_skipped, "clusters due to filtering criteria"))
+message(paste("Total features generated:", nrow(fold_changes_feature_value)))
 message("Created feature_fold_changes.csv with cluster-specific normalized log2 fold changes")
+message("Created detailed_feature_fold_changes.csv with additional information per feature")
