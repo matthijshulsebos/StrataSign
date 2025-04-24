@@ -15,10 +15,7 @@ annots_list <- read_csv("base/input_tables/annots_list.csv")
 hsa01100_genes <- read_csv("output/kegg/hsa01100_genes.csv")
 cell_metadata <- read_csv("base/input_tables/cell_metadata.csv")
 
-# Extract metadata
-table_s1 <- table_s1 %>% filter(Use.in.Clustering.Model. == "Yes")
-
-# Convert 'sample_ID' column to character
+# Convert sample_ID column to character
 table_s1 <- table_s1 %>% mutate(sample_ID = as.character(sample_ID))
 
 # Define doublet clusters to exclude
@@ -49,11 +46,9 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
   
   # Filter genes based on the gene set type
   if (gene_set_type == "metabolic") {
-    # Use metabolic genes
     genes_to_use <- metabolic_genes
     suffix <- "_metabolic"
   } else if (gene_set_type == "nonmetabolic") {
-    # Use non-metabolic genes
     genes_to_use <- setdiff(all_genes, metabolic_genes)
     # Limit to the same number of genes as metabolic for fair comparison
     if (length(genes_to_use) > length(metabolic_genes)) {
@@ -62,7 +57,6 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
     }
     suffix <- "_nonmetabolic"
   } else if (gene_set_type == "random") {
-    # Use random genes
     set.seed(43) 
     genes_to_use <- sample(all_genes, length(metabolic_genes))
     suffix <- "_random"
@@ -81,7 +75,8 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
   counts_long <- as.data.frame(as.table(counts))
   colnames(counts_long) <- c("sample_ID", "gene", "cluster", "count")
 
-  # Convert cluster column from factor to numeric
+  # Set appropriate variable types
+  counts_long$sample_ID <- as.character(counts_long$sample_ID)
   counts_long$cluster <- as.numeric(as.character(counts_long$cluster))
 
   # Convert cluster numbers to sublineage or lineage names
@@ -94,12 +89,6 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
       cluster = paste(cluster_name, cluster, sep = "_"),  # Create cluster identifier
       gene_cluster = paste(gene, cluster, sep = "@")  # Create feature name
     )
-
-  # Ensure count column is numeric
-  counts_long$count <- as.numeric(counts_long$count)
-
-  # Convert 'sample_ID' to character
-  counts_long$sample_ID <- as.character(counts_long$sample_ID)
 
   # Calculate mean total counts per sample
   mean_sample_size <- counts_long %>%
@@ -124,20 +113,19 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
            cluster_proportion = cluster_cell_count / total_cells) %>%
     ungroup()
 
-  # Convert 'sample_ID' to character in cluster_proportions
+  # Convert sample_ID to character in cluster_proportions
   cluster_proportions$sample_ID <- as.character(cluster_proportions$sample_ID)
 
   # Join cluster proportions with counts_long
   counts_long <- counts_long %>%
     left_join(cluster_proportions, by = c("sample_ID", "cluster_ID")) %>%
-    # Add a check for missing cluster proportions
     mutate(
       # Default to 1 if cluster_proportion is NA
       cluster_proportion = ifelse(is.na(cluster_proportion), 1, cluster_proportion),
-      # Correct for over/under-representation by dividing by cluster proportion
+      # Normalize by dividing by cluster proportion
       normalized_count = sample_normalized_count / cluster_proportion
     ) %>%
-    # Re-normalize to maintain the same total counts per sample
+    # Renormalize to maintain the same total counts per sample
     group_by(sample_ID) %>%
     mutate(
       total_after_norm = sum(normalized_count),
@@ -154,22 +142,29 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
               expected = mean_sample_size,
               diff = abs(total - expected)) %>%
     ungroup()
-  message("Final normalization check, max difference from expected: ", 
-          round(max(final_norm_check$diff), 6),
-          ", mean: ", round(mean(final_norm_check$diff), 6))
+
+  # Identify samples where the total normalized count is NaN or effectively zero
+  samples_to_filter <- final_norm_check %>%
+    filter(is.nan(total) | total < 1e-9) %>% 
+    pull(sample_ID)
+  
+  # Check if any samples need filtering and issue a warning
+  if (length(samples_to_filter) > 0) {
+    warning_message <- paste("Warning: Found", length(samples_to_filter), 
+                             "samples with NaN or zero total normalized counts for subset:", 
+                             subset_name, ", genes:", gene_set_type, 
+                             ". These samples will be filtered out. Samples:", 
+                             paste(samples_to_filter, collapse=", "))
+    message(warning_message) # Use message() instead of warning() to avoid stopping execution if treated as error
+
+    # Filter counts_long to remove these samples
+    counts_long <- counts_long %>%
+      filter(!sample_ID %in% samples_to_filter)
+  }
 
   # Apply log transformation
   counts_long <- counts_long %>%
     mutate(log_normalized_count = log1p(normalized_count))
-
-  # Output log transformation stats
-  log_stats <- summarize(counts_long, 
-                         min_val = min(log_normalized_count),
-                         mean_val = mean(log_normalized_count), 
-                         max_val = max(log_normalized_count))
-  message("Log transform stats, min: ", round(log_stats$min_val, 4),
-          ", mean: ", round(log_stats$mean_val, 4), 
-          ", max: ", round(log_stats$max_val, 4))
 
   # Pivot so each gene-cluster combo becomes its own column
   counts_wide <- counts_long %>%
@@ -184,14 +179,14 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
       by = "sample_ID"
     )
 
-  # Split train/test by patient_ID
+  # Split by patient_ID
   set.seed(42)
   patients <- unique(counts_wide$patient_ID)
   train_patients <- sample(patients, size = round(length(patients) * 0.7))
   train <- counts_wide %>% filter(patient_ID %in% train_patients)
   test <- counts_wide %>% filter(!patient_ID %in% train_patients)
   
-  # Extract and remove the target variable 'tissue'
+  # Extract and remove the target variable tissue
   y_train <- train$tissue
   y_test <- test$tissue
   train <- train %>% select(-tissue)
@@ -199,13 +194,11 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
   
   # Check for and handle NAs
   if (anyNA(train) || anyNA(test)) {
-    # Identify columns with NA values
     na_cols_train <- colnames(train)[colSums(is.na(train)) > 0]
     na_cols_test <- colnames(test)[colSums(is.na(test)) > 0]
     
     if (length(na_cols_train) > 0 || length(na_cols_test) > 0) {
       message("Replacing NA values with 0 for gene set type: ", gene_set_type)
-      # Replace NA values with 0
       train[is.na(train)] <- 0
       test[is.na(test)] <- 0
     }
@@ -219,7 +212,7 @@ preprocess_counts <- function(cluster_subset, subset_name, gene_set_type = "meta
   metadata_train <- table_s1 %>% filter(sample_ID %in% train$sample_ID) %>% arrange(match(sample_ID, train$sample_ID))
   write_csv(metadata_train, paste0(output_dir, "/metadata_", subset_name, suffix, ".csv"))
 
-  # Remove 'sample_ID' and 'patient_ID' from train and test datasets
+  # Remove sample_ID and patient_ID from train and test datasets
   train <- train %>% select(-sample_ID, -patient_ID)
   test <- test %>% select(-sample_ID, -patient_ID)
 

@@ -280,30 +280,13 @@ create_all_heatplots <- function() {
               fi_value <- feature_matrix[i,j]
               fc_value <- fc_matrix[i,j]  # This is log2 fold change
               
-              # Use absolute value of importance
-              abs_importance <- abs(fi_value)
-              
-              # For no importance, ratio is zero
-              if (abs_importance == 0) {
+              # Set importance to 0 if absolute log2 fold change is 1 or larger
+              if (abs(fc_value) >= 1) {
                 ratio_matrix[i,j] <- 0
-                next
+              } else {
+                # Keep original importance if fold change is small
+                ratio_matrix[i,j] <- fi_value
               }
-              
-              # Convert log2FC to regular FC
-              reg_fc <- 2^fc_value
-              
-              # Calculate distance from 1 (unchanged)
-              distance <- max(reg_fc, 1/reg_fc)
-              
-              # Calculate exponential decay scaling factor
-              # This creates a smooth curve through the same approximate points as the step function
-              scaling_factor <- exp(-5 * (distance - 1)^2)
-              
-              # Ensure minimum of 0.01 (1%) for very large fold changes
-              scaling_factor <- max(0.01, scaling_factor)
-              
-              # Apply the scaling factor directly
-              ratio_matrix[i,j] <- fi_value * scaling_factor
             }
           }
           

@@ -31,22 +31,6 @@ table_s1 <- read_csv("base/input_tables/table_s1_sample_table.csv")
 annots_list <- read_csv("base/input_tables/annots_list.csv")
 cell_metadata <- read_csv("base/input_tables/cell_metadata.csv") # Added cell metadata
 
-# Check if annots_list has the expected "cluster" column
-if (!"cluster" %in% colnames(annots_list)) {
-  stop("Required column 'cluster' missing in annots_list.csv")
-}
-
-# Filter samples to those used in the clustering model 
-table_s1 <- table_s1 %>% 
-  filter(Use.in.Clustering.Model. == "Yes") %>%
-  filter(!is.na(tissue)) %>%
-  mutate(tissue = toupper(tissue))
-
-# Validate we have sufficient samples after filtering
-if (nrow(table_s1) < 5) {
-  stop("Too few samples remain after filtering. Check input data.")
-}
-
 # Define doublet clusters to exclude
 clusters_to_exclude <- c(3, 4, 6, 12, 15, 21, 22, 24, 26, 27, 60)
 
@@ -83,17 +67,11 @@ cluster_proportions <- cell_metadata %>%
          cluster_proportion = cluster_cell_count / total_cells) %>%
   ungroup()
 
-# Set reference (normal) and comparison (tumor) levels explicitly
-ref_level <- "NORMAL"
-comparison_level <- "TUMOR"
+# Set reference and comparison levels
+ref_level <- "Normal" 
+comparison_level <- "Tumor"
 
-# Validate that these tissues exist in our data
-if (!all(c(ref_level, comparison_level) %in% table_s1$tissue)) {
-  stop(paste("Expected tissue types", ref_level, "and", comparison_level, 
-             "but found:", paste(unique(table_s1$tissue), collapse=", ")))
-}
-
-# Create sample metadata
+# Create sample metadata, filtering out samples with NA tissue
 sample_metadata <- table_s1 %>%
   select(sample_ID, tissue) %>%
   filter(sample_ID %in% rownames(counts)) %>%
@@ -116,30 +94,6 @@ process_counts <- function(count_matrix, sample_metadata, dataset_name, cluster_
   # Add condition information
   counts_long$condition <- sample_metadata[counts_long$sample_ID, "condition"]
   
-  # REMOVED: Filter genes with low counts
-  # Instead, just track how many zero-count genes we have
-  gene_totals <- counts_long %>%
-    group_by(gene) %>%
-    summarize(
-      total_count = sum(count),
-      zero_count_samples = sum(count == 0),
-      .groups = 'drop'
-    )
-  
-  # Only report the gene filtering statistics but don't actually filter
-  low_expr_genes <- sum(gene_totals$total_count < 10)
-  total_genes <- nrow(gene_totals)
-  if (low_expr_genes > 0) {
-    message(paste("  Note:", dataset_name, "has", low_expr_genes, "genes with count < 10 out of", total_genes, "total genes"))
-  }
-  
-  # Skip only if we have too few genes total
-  if (total_genes < 10) {
-    message(paste("  Skipping", dataset_name, "- too few genes total"))
-    return(NULL)
-  }
-  
-  # Rest of the function remains the same
   # Calculate mean sample size for normalization
   mean_sample_size <- counts_long %>%
     group_by(sample_ID) %>%
@@ -195,12 +149,12 @@ process_counts <- function(count_matrix, sample_metadata, dataset_name, cluster_
   # Calculate log2 fold changes
   result_df <- condition_means %>%
     mutate(
-      # Using explicit column names
-      mean_expr_normal = get(paste0("mean_expr_", ref_level)),
-      mean_expr_tumor = get(paste0("mean_expr_", comparison_level)),
-      log2FoldChange = log2((mean_expr_tumor + 1) / (mean_expr_normal + 1)),
-      n_normal = get(paste0("n_samples_", ref_level)),
-      n_tumor = get(paste0("n_samples_", comparison_level))
+      # Using explicit column names matching the exact case
+      mean_expr_normal = get(paste0("mean_expr_", ref_level)), # Will look for mean_expr_Normal
+      mean_expr_tumor = get(paste0("mean_expr_", comparison_level)), # Will look for mean_expr_Tumor
+      log2FoldChange = log2((mean_expr_tumor + 0.1) / (mean_expr_normal + 0.1)),
+      n_normal = get(paste0("n_samples_", ref_level)), # Will look for n_samples_Normal
+      n_tumor = get(paste0("n_samples_", comparison_level)) # Will look for n_samples_Tumor
     )
   
   return(result_df)
