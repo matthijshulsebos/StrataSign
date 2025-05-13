@@ -1,0 +1,7 @@
+training_parameters:
+  # Options: "absolute" or "relative"
+  dataset_type: "relative" 
+  # Options: true or false
+  include_gene_ablation: true 
+  # Options: true or false
+  include_cell_type_ablation: true 
