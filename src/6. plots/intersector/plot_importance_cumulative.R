@@ -36,7 +36,7 @@ plot_cumulative_importance <- function(model_output_dir = "output/models",
     model_type = sapply(path_parts, function(x) if(length(x) >= 1) x[1] else NA_character_),
     dataset = sapply(path_parts, function(x) if(length(x) >= 2) x[2] else NA_character_),
     version = sapply(path_parts, function(x) if(length(x) >= 3) x[3] else NA_character_)
-  ) %>% select(-path_parts, -relative_path)
+  ) %>% dplyr::select(-path_parts, -relative_path)
 
 
   for (model_t in unique(file_metadata$model_type)) {

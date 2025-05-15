@@ -36,14 +36,13 @@ plot_feature_agreement_dotplot <- function(top_n_overall_data,
   # Pivot the data to long format for plotting
   # Include gene and sublineage for creating display names
   agreement_data_long <- agreement_subset_data %>%
-    select(feature_id, gene, sublineage, meta_score, all_of(valid_scaled_cols)) %>%
-    pivot_longer(
-      cols = all_of(valid_scaled_cols),
+    dplyr::select(feature_id, gene, sublineage, meta_score, dplyr::all_of(valid_scaled_cols)) %>%
+    tidyr::pivot_longer(
+      cols = dplyr::all_of(valid_scaled_cols),
       names_to = "model_col_name", 
-      values_to = "scaled_importance" # These are the scaled scores from meta_scores.csv
+      values_to = "scaled_importance"
     ) %>%
-    # Clean up model names for display (remove "_score" suffix)
-    mutate(model_display_name = gsub("_score$", "", model_col_name))
+    dplyr::mutate(model_display_name = gsub("_score$", "", model_col_name))
 
   # Create a display name for features using gene and sublineage
   # Order features by their original meta_score for consistent plot appearance

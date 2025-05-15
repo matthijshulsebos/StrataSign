@@ -93,7 +93,7 @@ cut_dendrogram <- function(hc, h = NULL, min_clusters = 2, max_clusters = 6, ret
 # Function to prepare data
 prepare_heatmap_data <- function(data_path, n_top_genes = 50) {
   # Read feature importance csv
-  data_df <- fread(data_path, colClasses = c("Feature" = "character", "Value" = "numeric"))
+  data_df <- fread(data_path, colClasses = c("Feature" = "character", "Value" = "numeric")) %>% as_tibble()
   
   # Transform data from long format
   data_long <- data_df %>% 

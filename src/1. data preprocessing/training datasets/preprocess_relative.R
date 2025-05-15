@@ -32,7 +32,7 @@ counts_initial <- lung_ldm$dataset$counts
 
 # Filter out doublets
 all_clusters_initial <- as.numeric(dimnames(counts_initial)[[3]])
-clusters_to_keep_initial <- all_clusters_initial[!all_clusters_initial %in% CLUSTERS_TO_EXCLUDE]
+clusters_to_keep_initial <- all_clusters_initial[!all_clusters_initial %in% DOUBLETS]
 counts_filtered <- counts_initial[, , as.character(clusters_to_keep_initial), drop = FALSE]
 
 # Filter counts to match samples present in table_s1
@@ -127,47 +127,24 @@ preprocess_subset <- function(counts_input_3d, # Use the doublet filtered 3D mat
       return()
   }
 
-  # Calculate mean total counts per sample for this specific subset (using the modified counts_long)
-  mean_sample_size <- counts_long %>%
-    group_by(sample_ID) %>%
-    summarize(sample_size = sum(count), .groups = 'drop') %>%
-    summarize(mean_size = mean(sample_size)) %>%
-    pull(mean_size)
-
-  # Normalize counts by total sample counts
-  counts_sample_norm <- counts_long %>%
-    group_by(sample_ID) %>%
-    mutate(total_sample_counts = sum(count),
-           sample_normalized_count = ifelse(total_sample_counts > 0, (count / total_sample_counts) * mean_sample_size, 0)) %>%
-    ungroup()
-  
-  # Calculate cluster proportions using cell_metadata
-  cluster_proportions <- cell_metadata_df %>%
-    filter(sample_ID %in% unique(counts_sample_norm$sample_ID)) %>%
+  # Calculate total counts per sample and cluster
+  total_counts_celltype_sample <- counts_long %>%
     group_by(sample_ID, cluster_ID) %>%
-    summarize(cluster_cell_count = n(), .groups = 'drop') %>%
-    group_by(sample_ID) %>%
-    mutate(total_cells = sum(cluster_cell_count),
-           cluster_proportion = ifelse(total_cells > 0, cluster_cell_count / total_cells, 0)) %>%
-    ungroup() %>%
-    select(sample_ID, cluster_ID, cluster_proportion)
+    summarize(total_counts_in_celltype = sum(count), .groups = 'drop')
 
-  # Join proportions and normalize by proportion then renormalize 
-  counts_relative_norm <- counts_sample_norm %>%
-    left_join(cluster_proportions, by = c("sample_ID", "cluster_ID")) %>%
+  # Calculate global mean of these totals
+  global_avg_celltype_total <- total_counts_celltype_sample %>%
+    summarize(mean_total = mean(total_counts_in_celltype)) %>%
+    pull(mean_total)
+
+  # Join totals back and normalize within each sample and cluster, then scale to global mean
+  counts_relative_norm <- counts_long %>%
+    left_join(total_counts_celltype_sample, by = c("sample_ID", "cluster_ID")) %>%
     mutate(
-      # Handle NA/zero proportions
-      cluster_proportion_safe = ifelse(is.na(cluster_proportion) | cluster_proportion == 0, 1, cluster_proportion),
-      normalized_count_prop = sample_normalized_count / cluster_proportion_safe
+      gene_fraction_in_celltype = ifelse(total_counts_in_celltype > 0, count / total_counts_in_celltype, 0),
+      normalized_count = gene_fraction_in_celltype * global_avg_celltype_total
     ) %>%
-    group_by(sample_ID) %>%
-    mutate(
-      total_after_prop_norm = sum(normalized_count_prop),
-      # Handle potential division by zero during renormalization
-      normalized_count = ifelse(total_after_prop_norm > 0, normalized_count_prop * (mean_sample_size / total_after_prop_norm), 0)
-    ) %>%
-    ungroup() %>%
-    select(sample_ID, gene_cluster, normalized_count) # Keep only needed columns
+    select(sample_ID, gene_cluster, normalized_count)
 
   # Filter samples with NaN/zero total normalized counts after all steps
   final_norm_check <- counts_relative_norm %>%
