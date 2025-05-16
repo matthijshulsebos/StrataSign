@@ -1,0 +1,6 @@
+"PathwayID","PathwayName","GeneCountFromInput","InputGeneSymbolsInPathway"
+"hsa00562","Inositol phosphate metabolism",1,"INPPL1"
+"hsa04662","B cell receptor signaling pathway",1,"INPPL1"
+"hsa04070","Phosphatidylinositol signaling system",1,"INPPL1"
+"hsa04666","Fc gamma R-mediated phagocytosis",1,"INPPL1"
+"hsa04910","Insulin signaling pathway",1,"INPPL1"

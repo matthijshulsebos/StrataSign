@@ -1,0 +1,6 @@
+"PathwayID","PathwayName","GeneCountFromInput","InputGeneSymbolsInPathway"
+"hsa00790","Folate biosynthesis",1,"AKR1C3"
+"hsa04913","Ovarian steroidogenesis",1,"AKR1C3"
+"hsa00140","Steroid hormone biosynthesis",1,"AKR1C3"
+"hsa00590","Arachidonic acid metabolism",1,"AKR1C3"
+"hsa05208","Chemical carcinogenesis - reactive oxygen species",1,"AKR1C3"

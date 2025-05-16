@@ -1,0 +1,6 @@
+"PathwayID","PathwayName","GeneCountFromInput","InputGeneSymbolsInPathway"
+"hsa00052","Galactose metabolism",1,"GALM"
+"hsa04923","Regulation of lipolysis in adipocytes",1,"PNPLA2"
+"hsa00561","Glycerolipid metabolism",1,"PNPLA2"
+"hsa00010","Glycolysis / Gluconeogenesis",1,"GALM"
+"hsa04714","Thermogenesis",1,"PNPLA2"

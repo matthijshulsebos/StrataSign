@@ -1,0 +1,5 @@
+"PathwayID","PathwayName","GeneCountFromInput","InputGeneSymbolsInPathway"
+"hsa00620","Pyruvate metabolism",1,"ME1"
+"hsa00330","Arginine and proline metabolism",1,"AGMAT"
+"hsa03320","PPAR signaling pathway",1,"ME1"
+"hsa01200","Carbon metabolism",1,"ME1"

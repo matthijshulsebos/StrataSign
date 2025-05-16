@@ -1,0 +1,5 @@
+"PathwayID","PathwayName","GeneCountFromInput","InputGeneSymbolsInPathway"
+"hsa01040","Biosynthesis of unsaturated fatty acids",1,"ELOVL6"
+"hsa00062","Fatty acid elongation",1,"ELOVL6"
+"hsa00350","Tyrosine metabolism",1,"PNMT"
+"hsa01212","Fatty acid metabolism",1,"ELOVL6"

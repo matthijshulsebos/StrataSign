@@ -1,0 +1,13 @@
+Dataset,Best_Accuracy_Model,Best_Accuracy,Best_F1_Model,Best_F1,Best_AUC_Model,Best_AUC
+all_clusters_metabolic,svm_linear,0.9565217391304348,svm_linear,0.96,svm_linear,1
+all_clusters_nonmetabolic,svm_linear,0.9565217391304348,svm_linear,0.962962962962963,svm_rbf,1
+all_clusters_random,svm_linear,1,svm_linear,1,svm_linear,1
+lcam_both_metabolic,elasticnet,0.9565217391304348,svm_linear,0.96,elasticnet,0.9846153846153848
+lcam_both_nonmetabolic,svm_linear,1,svm_linear,1,svm_linear,1
+lcam_both_random,elasticnet,0.9130434782608696,elasticnet,0.9090909090909092,svm_linear,1
+lcam_hi_metabolic,elasticnet,0.8260869565217391,svm_rbf,0.8333333333333334,elasticnet,0.9153846153846156
+lcam_hi_nonmetabolic,elasticnet,0.9130434782608696,elasticnet,0.9090909090909092,elasticnet,0.9
+lcam_hi_random,randomforest,0.8695652173913043,randomforest,NA,svm_linear,0.9
+lcam_lo_metabolic,lasso,0.9565217391304348,lasso,0.9523809523809524,randomforest,1
+lcam_lo_nonmetabolic,elasticnet,0.8260869565217391,svm_linear,0.8148148148148147,randomforest,0.953846153846154
+lcam_lo_random,elasticnet,0.9565217391304348,randomforest,0.9523809523809524,elasticnet,1

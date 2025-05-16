@@ -1,0 +1,4 @@
+"PathwayID","PathwayName","GeneCountFromInput","InputGeneSymbolsInPathway"
+"hsa00531","Glycosaminoglycan degradation",1,"HYAL2"
+"hsa00590","Arachidonic acid metabolism",1,"PTGES"
+"hsa04142","Lysosome",1,"HYAL2"

@@ -1,0 +1,8 @@
+"PathwayID","PathwayName","GeneCountFromInput","InputGeneSymbolsInPathway"
+"hsa00450","Selenocompound metabolism",1,"CTH"
+"hsa00670","One carbon pool by folate",1,"CTH"
+"hsa00260","Glycine, serine and threonine metabolism",1,"CTH"
+"hsa00270","Cysteine and methionine metabolism",1,"CTH"
+"hsa00600","Sphingolipid metabolism",1,"GM2A"
+"hsa01230","Biosynthesis of amino acids",1,"CTH"
+"hsa04142","Lysosome",1,"GM2A"
