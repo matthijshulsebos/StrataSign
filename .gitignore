@@ -16,7 +16,7 @@ results/**
 !results/**/README.md
 
 # Original repository content
-original/
+base/
 
 # VS Code specific files
 .vscode/
@@ -25,20 +25,7 @@ original/
 .settings/
 
 # Output directories
-src/**/output/
-src/output/
-src/modeling/**/output/
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.venv/
-venv/
-ENV/
-env/
-.env/
+output
 
 # R
 .Rhistory 
@@ -50,29 +37,6 @@ env/
 .httr-oauths
 *_cache/
 /cache/
-
-# Common data formats
-*.csv
-*.tsv
-*.xlsx
-*.xls
-*.rds
-*.RDS
-*.rda
-*.RDA
-*.pdf
-
-# Image files
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.bmp
-*.tiff
-*.ico
-
-# But not these specific files
-!stratasign.png
 
 # OS specific
 .DS_Store

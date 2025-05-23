@@ -41,6 +41,7 @@ load_and_extract_features <- function(file_path, model_name) {
     message("Error reading ",file_path,": ",e$message); NULL
   })
   if (is.null(df) || !"Feature"%in%names(df)||!"Value"%in%names(df)||nrow(df)==0) return(NULL)
+  
   df %>%
     transmute(
       feature_id = as.character(Feature),
@@ -53,14 +54,50 @@ load_and_extract_features <- function(file_path, model_name) {
 }
 
 # Find and filter files
-get_filtered_feature_files <- function(models_dir, gene_type, cell_type) {
-  all_csv <- dir_ls(models_dir, recurse=TRUE, regexp="feature_importance.*\\.csv$")
-  segment <- file.path(gene_type, cell_type)
-  keep  <- grep(segment, all_csv, value=TRUE)
-  map(keep, ~list(
-    file_path  = .x,
-    model_name = path_split(path_rel(.x, models_dir))[[1]][1]
-  ))
+get_filtered_feature_files <- function(models_dir, target_gene_type, target_cell_type) {
+  
+  # models_dir is e.g., "output/2. models/absolute"
+  
+  # Get model subdirectories (e.g., elasticnet, lasso)
+  model_subdirs <- fs::dir_ls(models_dir, type = "directory")
+  
+  if (length(model_subdirs) == 0) {
+    return(list())
+  }
+
+  all_found_files_list <- list() # Initialize an empty list to collect file info
+
+  for (model_subdir_path in model_subdirs) {
+    model_name_from_path <- fs::path_file(model_subdir_path) # Get 'elasticnet' from '.../absolute/elasticnet'
+    
+    # Construct the full path to where the CSV files should be
+    # e.g., output/2. models/absolute/elasticnet/metabolic/all_clusters
+    specific_target_dir <- fs::path(model_subdir_path, target_gene_type, target_cell_type)
+    
+    if (fs::dir_exists(specific_target_dir)) {
+      # Define the glob pattern and its regex equivalent
+      file_name_glob_pattern <- "feature_importance*.csv"
+      regex_pattern_for_list_files <- utils::glob2rx(file_name_glob_pattern)
+      
+      # Use base R's list.files()
+      files_in_specific_dir <- list.files(path = specific_target_dir, 
+                                          pattern = regex_pattern_for_list_files, 
+                                          full.names = TRUE, 
+                                          recursive = FALSE,
+                                          ignore.case = TRUE)
+      
+      if (length(files_in_specific_dir) > 0) {
+        for (f_path in files_in_specific_dir) {
+          all_found_files_list[[length(all_found_files_list) + 1]] <- list(
+            file_path = as.character(f_path), 
+            model_name = model_name_from_path
+          )
+        }
+      }
+    }
+  } # End loop over model_subdirs
+  
+  return(all_found_files_list) 
 }
 
 # Extract all into one data frame
@@ -142,14 +179,17 @@ filter_and_write <- function(df, min_models, all_models, out_dir) {
 # Main intersector function
 find_feature_intersection <- function(models_dir, output_dir, min_models_occurrence, cell_type_filter_val) {
   dir_create(output_dir, recurse=TRUE)
-  gene_type <- "metabolic"
+  gene_type <- "metabolic" # This is the target gene_type for this function's scope
 
+  # Pass target_gene_type and target_cell_type to the updated function
   fm_list <- get_filtered_feature_files(models_dir, gene_type, cell_type_filter_val)
+  
   if (length(fm_list)==0) {
     message("No files for gene=",gene_type," cell=",cell_type_filter_val)
     return(NULL)
   }
   all_feat <- extract_all_features(fm_list)
+  
   models   <- sort(unique(all_feat$model_type))
 
   if (nrow(all_feat)==0) {
@@ -225,8 +265,8 @@ run_intersector <- function(
     cell_type = cell_types_to_process,
     stringsAsFactors = FALSE
   ) %>%
-    pmap_chr(~ process_dataset_and_cell_type(..1, ..2, base_models_dir, base_output_dir, min_models_param)) %>%
-    discard(is.null)
+    purrr::pmap(~ process_dataset_and_cell_type(..1, ..2, base_models_dir, base_output_dir, min_models_param)) %>%
+    purrr::compact() # Replaces discard(is.null) and works with list from pmap
   
   generate_sublineage_color_map(meta_score_files, sublineage_color_map_path)
   message("Finished intersector analysis.")

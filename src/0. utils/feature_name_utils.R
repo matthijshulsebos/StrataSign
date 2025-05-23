@@ -126,3 +126,33 @@ get_simplified_sublineage <- function(identifier, default_value = "None") {
   # Apply to each element in input
   sapply(identifier, process_single_id, USE.NAMES = FALSE)
 }
+
+# Extracts the numeric cluster ID from a feature identifier
+# Assumes feature_identifier is like "gene@clustername_clusterid"
+# or "gene@clustername_with_underscores_clusterid"
+get_cluster_id_from_feature <- function(feature_identifier) {
+  sapply(feature_identifier, function(fi) {
+    if (!is.character(fi) || is.na(fi) || !grepl("@", fi, fixed = TRUE)) return(NA_character_)
+    
+    parts <- strsplit(fi, "@", fixed = TRUE)[[1]]
+    if (length(parts) != 2) return(NA_character_) # Ensure there's a part after @
+    
+    cluster_string_part <- parts[2]
+    if (nchar(cluster_string_part) == 0) return(NA_character_)
+
+    # Regex to find a numeric ID at the end of the cluster string, preceded by an underscore.
+    # It captures the numeric part.
+    # Example: "clustername_123" -> "123"
+    # Example: "cluster_name_with_parts_123" -> "123"
+    match_data <- regexec(".*?_(\\d+)$", cluster_string_part) # Non-greedy match for the name part
+    
+    if (match_data[[1]][1] != -1) {
+      extracted_parts <- regmatches(cluster_string_part, match_data)[[1]]
+      # The cluster ID is the first captured group (index 2 of extracted_parts,
+      # as extracted_parts[1] is the full match of the regex against cluster_string_part)
+      return(extracted_parts[2]) # This will be the numeric ID as a string
+    } else {
+      return(NA_character_) # No numeric ID found at the end of the cluster_string_part
+    }
+  }, USE.NAMES = FALSE)
+}
