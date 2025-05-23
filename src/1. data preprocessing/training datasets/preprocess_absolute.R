@@ -3,6 +3,7 @@ library(tidyr)
 library(readr)
 library(Matrix)
 library(scales)
+library(ggplot2)
 
 DOUBLETS <- c(3, 4, 6, 12, 15, 21, 22, 24, 26, 27, 60)
 GENE_SET_TYPES <- c("metabolic", "nonmetabolic", "random")
@@ -11,6 +12,7 @@ CLUSTER_DEFINITIONS <- list(
   lcam_hi = c(44, 9, 17, 28, 46, 11, 42),
   lcam_lo = c(56, 34, 53, 10, 25, 54, 55, 57, 45, 14, 16),
   lcam_both = c(c(44, 9, 17, 28, 46, 11, 42), c(56, 34, 53, 10, 25, 54, 55, 57, 45, 14, 16)),
+  macrophages = c(5, 8, 10, 11, 25, 32, 33, 35, 38, 42, 47, 54, 55, 57),
   all_clusters = NULL
 )
 
@@ -224,3 +226,99 @@ for (subset_name in names(CLUSTER_DEFINITIONS)) {
 }
 
 message("\n All preprocessing complete!")
+
+
+# --- Configuration ---
+counts_file_path <- "path/to/your/counts_dataset.csv" # Replace with your actual counts file path
+# Example: metabolic_genes_list <- c("PDHA1", "ACO2", "IDH1", "SUCLG1", "HK1", "PFKFB3") 
+# Or load from a file:
+metabolic_genes_file_path <- "path/to/your/metabolic_genes_list.txt" # Replace if loading from file, one gene per line
+output_plot_path <- "output/metabolic_gene_proportions.png" # Define where to save the plot
+figure_dir <- "output/1. preprocessing_qc" # Define a directory for plots
+
+# Create directory if it doesn't exist
+dir.create(figure_dir, showWarnings = FALSE, recursive = TRUE)
+output_plot_path <- file.path(figure_dir, "metabolic_gene_proportions.png")
+
+
+# --- Load Data ---
+message(paste("Loading counts data from:", counts_file_path))
+counts_data <- read_csv(counts_file_path) # Or read_tsv if tab-separated
+
+# Assuming the first column is gene names, and subsequent columns are samples
+# Let's rename the first column to "gene" for clarity if it's not already named appropriately
+# If your gene column has a different name, adjust "GENE_COLUMN_NAME"
+# counts_data <- counts_data %>% rename(gene = GENE_COLUMN_NAME) 
+
+# Ensure gene names are character
+counts_data <- counts_data %>% mutate(across(1, as.character)) 
+gene_col_name <- names(counts_data)[1]
+
+
+message("Loading metabolic genes list...")
+# Option 1: Define directly
+# metabolic_genes_list <- c("PDHA1", "ACO2", "IDH1", "SUCLG1", "HK1", "PFKFB3") # Make sure these match gene names in counts_data
+
+# Option 2: Load from a file (one gene per line)
+if (file.exists(metabolic_genes_file_path)) {
+  metabolic_genes_list <- read_lines(metabolic_genes_file_path)
+  metabolic_genes_list <- metabolic_genes_list[metabolic_genes_list != ""] # Remove empty lines
+} else {
+  stop(paste("Metabolic genes file not found:", metabolic_genes_file_path))
+  # Or define a default list if the file is optional:
+  # metabolic_genes_list <- c("GENE1", "GENE2") 
+}
+
+message(paste("Loaded", length(metabolic_genes_list), "metabolic genes."))
+
+# --- Preprocess and Calculate Proportions ---
+
+# Convert to long format for easier processing: gene, sample, count
+counts_long <- counts_data %>%
+  pivot_longer(cols = -all_of(gene_col_name), names_to = "sample", values_to = "count")
+
+# Calculate total counts per sample
+total_counts_per_sample <- counts_long %>%
+  group_by(sample) %>%
+  summarise(total_sample_counts = sum(count, na.rm = TRUE), .groups = 'drop')
+
+# Filter for metabolic genes and calculate their total counts per sample
+metabolic_counts_per_sample <- counts_long %>%
+  filter(.data[[gene_col_name]] %in% metabolic_genes_list) %>%
+  group_by(sample) %>%
+  summarise(total_metabolic_counts = sum(count, na.rm = TRUE), .groups = 'drop')
+
+# Join total and metabolic counts, then calculate proportion
+proportion_data <- total_counts_per_sample %>%
+  left_join(metabolic_counts_per_sample, by = "sample") %>%
+  mutate(
+    total_metabolic_counts = ifelse(is.na(total_metabolic_counts), 0, total_metabolic_counts), # Handle samples with no metabolic genes found
+    proportion_metabolic = ifelse(total_sample_counts > 0, total_metabolic_counts / total_sample_counts, 0)
+  )
+
+message("Proportion data calculated:")
+print(head(proportion_data))
+
+# --- Plot Proportions ---
+plot_title <- "Proportion of Metabolic Gene Counts per Sample"
+
+p <- ggplot(proportion_data, aes(x = reorder(sample, -proportion_metabolic), y = proportion_metabolic)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = plot_title,
+    x = "Sample",
+    y = "Proportion of Metabolic Gene Counts"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 8),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+# Save the plot
+ggsave(output_plot_path, plot = p, width = 10, height = 6, dpi = 300)
+message(paste("Plot saved to:", output_plot_path))
+
+# Display the plot (optional, if running interactively)
+# print(p)

@@ -34,7 +34,7 @@ summary_dir <- output_base_dir
 dir.create(output_base_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Define datasets and versions to process based on config
-all_dataset_names <- c("all_clusters", "lcam_hi", "lcam_lo", "lcam_both")
+all_dataset_names <- c("all_clusters", "lcam_hi", "lcam_lo", "lcam_both", "macrophages")
 all_versions <- c("metabolic", "nonmetabolic", "random")
 
 if (include_cell_type_ablation) {
