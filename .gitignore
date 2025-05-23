@@ -25,7 +25,8 @@ base/
 .settings/
 
 # Output directories
-output
+output/4. differential expression
+output/1. data preprocessing
 
 # R
 .Rhistory 
