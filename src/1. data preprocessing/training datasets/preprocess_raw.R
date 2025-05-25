@@ -6,7 +6,7 @@ library(scales)
 
 DOUBLETS <- c(3, 4, 6, 12, 15, 21, 22, 24, 26, 27, 60)
 GENE_SET_TYPES <- c("metabolic", "nonmetabolic", "random")
-BASE_OUTPUT_DIR <- file.path("output", "1. data preprocessing", "training datasets", "absolute") 
+BASE_OUTPUT_DIR <- file.path("output", "1. data preprocessing", "training datasets", "raw") 
 CLUSTER_DEFINITIONS <- list(
   lcam_hi = c(44, 9, 17, 28, 46, 11, 42),
   lcam_lo = c(56, 34, 53, 10, 25, 54, 55, 57, 45, 14, 16),
@@ -51,22 +51,23 @@ counts_long <- counts_long %>%
   ) %>%
   filter(count > 0) # Filter zero counts for efficiency
 
-# Calculate total counts per cell type per sample
-total_counts_celltype_sample <- counts_long %>%
-  group_by(sample_ID, cluster_ID) %>%
-  summarise(total_counts_in_celltype = sum(count), .groups = 'drop')
+# Calculate total counts per sample
+total_counts_per_sample <- counts_long %>%
+  group_by(sample_ID) %>%
+  summarise(total_counts = sum(count), .groups = 'drop')
 
-# Calculate the global average of cell type totals
-global_avg_celltype_total <- total_counts_celltype_sample %>%
-  summarise(mean_total = mean(total_counts_in_celltype)) %>%
-  pull(mean_total)
+# Calculate the target count (median of total counts across samples)
+target_count <- median(total_counts_per_sample$total_counts)
+message("Target count for read depth normalization: ", target_count)
 
-# Calculate gene fraction and normalized counts
+# Apply read depth normalization (making sure each sample has the same total count)
 counts_normalized <- counts_long %>%
-  left_join(total_counts_celltype_sample, by = c("sample_ID", "cluster_ID")) %>%
+  left_join(total_counts_per_sample, by = "sample_ID") %>%
   mutate(
-    gene_fraction_in_celltype = ifelse(total_counts_in_celltype > 0, count / total_counts_in_celltype, 0),
-    normalized_count = gene_fraction_in_celltype * global_avg_celltype_total
+    # Scale factor to normalize read depth
+    scaling_factor = target_count / total_counts,
+    # Apply scaling factor to normalize counts
+    normalized_count = count * scaling_factor
   ) %>%
   select(sample_ID, gene, cluster_ID, normalized_count)
 
