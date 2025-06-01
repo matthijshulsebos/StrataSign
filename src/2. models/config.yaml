@@ -1,7 +1,41 @@
 training_parameters:
-  # Options: "raw", "absolute", "relative", "all"
-  dataset_type: "raw" 
-  # Options: true or false
-  include_gene_ablation: true 
-  # Options: true or false
-  include_cell_type_ablation: true 
+  # Choose the type of normalization to apply to the data
+  norm_type:
+    raw: true
+    absolute: true
+    relative: false
+    cp10k: true
+    cp10k_ctnorm: true
+
+  # Choose the type of genes to include in the training
+  gene_type:
+    metabolic: true
+    nonmetabolic: false
+    random: false
+
+  # Choose the types of cells to train on
+  cell_type:
+    macrophages: true
+    lcam_hi: true
+    lcam_lo: true
+    lcam_both: true
+    all_clusters: true
+
+  # Set which models to train
+  models:
+    - name: "lasso"
+      train: true
+    - name: "elasticnet"
+      train: true
+    - name: "svmlinear"
+      train: true
+    - name: "svmrbf"
+      train: true
+    - name: "randomforest"
+      train: true
+    - name: "xgboost"
+      train: true
+    - name: "spls"
+      train: true
+    - name: "lightgbm"
+      train: true
