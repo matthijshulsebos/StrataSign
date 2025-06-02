@@ -9,13 +9,14 @@ source("src/1. data preprocessing/training datasets/data_utils.R")
 source("src/1. data preprocessing/training datasets/normalization_utils.R")
 source("src/1. data preprocessing/training datasets/subset_utils.R")
 
-
-# Available methods: cp10k, cp10k_ctnorm, absolute, raw
+# Available methods: cp10k, cp10k_ctnorm, cp10k_ctnorm_relative, proportion_ctnorm, proportion_ctnorm_relative, sample_depth
 METHODS_TO_RUN <- c(
   "cp10k",
-  "cp10k_ctnorm", 
-  "absolute",
-  "raw"
+  "cp10k_ctnorm",
+  "cp10k_ctnorm_relative",
+  "proportion_ctnorm", 
+  "proportion_ctnorm_relative",
+  "sample_depth"
 )
 
 # Configuration constants
@@ -30,7 +31,12 @@ CLUSTER_DEFINITIONS <- list(
 )
 
 # Supported normalization methods
-NORMALIZATION_METHODS <- c("cp10k", "cp10k_ctnorm", "absolute", "raw")
+NORMALIZATION_METHODS <- c("cp10k", 
+                            "cp10k_ctnorm", 
+                            "cp10k_ctnorm_relative", 
+                            "proportion_ctnorm", 
+                            "proportion_ctnorm_relative", 
+                            "sample_depth")
 
 # Main preprocessing pipeline function
 run_preprocessing_pipeline <- function(normalization_method) {
@@ -46,108 +52,119 @@ run_preprocessing_pipeline <- function(normalization_method) {
   annots_list <- datasets$annots_list
   hsa01100_genes <- datasets$hsa01100_genes
   
-  # Branch based on normalization method
+  # Determine processing approach
+  is_relative_method <- grepl("_relative$", normalization_method)
+  
+  if (is_relative_method) {
+    run_relative_approach(normalization_method, lung_ldm, table_s1, annots_list, hsa01100_genes, base_output_dir)
+  } else {
+    run_global_approach(normalization_method, lung_ldm, table_s1, annots_list, hsa01100_genes, base_output_dir)
+  }
+  
+  message(sprintf("%s preprocessing complete", normalization_method))
+}
+
+# Normalize all data then create subsets
+run_global_approach <- function(normalization_method, lung_ldm, table_s1, annots_list, hsa01100_genes, base_output_dir) {
+  message("Using global normalization approach...")
+  
+  # Apply normalization to all data
+  counts_normalized <- apply_normalization_method(normalization_method, lung_ldm, table_s1, DOUBLETS)
+  
+  # Apply common post processing
+  counts_processed_long <- apply_global_postprocessing(counts_normalized, annots_list)
+  
+  # Create and save all subsets using the subset processor
+  process_all_subsets_unified(counts_processed_long, CLUSTER_DEFINITIONS, GENE_SET_TYPES, 
+                              hsa01100_genes, table_s1, base_output_dir, is_relative = FALSE)
+}
+
+# Create subsets first then normalize each one
+run_relative_approach <- function(normalization_method, lung_ldm, table_s1, annots_list, hsa01100_genes, base_output_dir) {
+  message("Using relative normalization approach...")
+  
+  # Prepare base data for filtering
+  base_data <- prepare_base_data_for_relative(normalization_method, lung_ldm, table_s1, DOUBLETS)
+  
+  # Process each cell type and gene combination with its own normalization
+  process_all_subsets_unified(base_data, CLUSTER_DEFINITIONS, GENE_SET_TYPES, 
+                              hsa01100_genes, table_s1, base_output_dir, is_relative = TRUE, 
+                              normalization_method = normalization_method, annots_list = annots_list)
+}
+
+# Aply normalization based on method
+apply_normalization_method <- function(normalization_method, lung_ldm, table_s1, doublets) {
   if (normalization_method == "cp10k") {
-    # Prepare cell metadata for CP10K normalization
-    cell_metadata_filtered_df <- prepare_cell_metadata(lung_ldm, table_s1, DOUBLETS)
-    
-    # Filter UMI table based on cell metadata
+    cell_metadata_filtered_df <- prepare_cell_metadata(lung_ldm, table_s1, doublets)
     umitab_filtered <- filter_umitab(lung_ldm$dataset$umitab, cell_metadata_filtered_df)
-    
-    # Clear redundant leader datasets
-    rm(lung_ldm)
-    gc()
-    
-    # Apply CP10K normalization (includes aggregation)
-    counts_normalized <- normalize_cp10k(cell_metadata_filtered_df, umitab_filtered, annots_list, DOUBLETS)
-    
-    # Clear intermediate objects
-    rm(cell_metadata_filtered_df, umitab_filtered)
+    counts_normalized <- normalize_cp10k(cell_metadata_filtered_df, umitab_filtered, NULL, doublets)
+    rm(lung_ldm, cell_metadata_filtered_df, umitab_filtered)
     gc()
     
   } else if (normalization_method == "cp10k_ctnorm") {
-    # Prepare cell metadata for CP10K with cell type normalization
-    cell_metadata_filtered_df <- prepare_cell_metadata(lung_ldm, table_s1, DOUBLETS)
-    
-    # Filter UMI table based on cell metadata
+    cell_metadata_filtered_df <- prepare_cell_metadata(lung_ldm, table_s1, doublets)
     umitab_filtered <- filter_umitab(lung_ldm$dataset$umitab, cell_metadata_filtered_df)
-    
-    # Clear redundant leader datasets
-    rm(lung_ldm)
+    counts_normalized <- normalize_cp10k_celltype(cell_metadata_filtered_df, umitab_filtered, NULL, doublets)
+    rm(lung_ldm, cell_metadata_filtered_df, umitab_filtered)
     gc()
     
-    # Apply CP10K with cell type normalization (includes aggregation)
-    counts_normalized <- normalize_cp10k_celltype(cell_metadata_filtered_df, umitab_filtered, annots_list, DOUBLETS)
-    
-    # Clear intermediate objects
-    rm(cell_metadata_filtered_df, umitab_filtered)
-    gc()
-    
-  } else if (normalization_method == "absolute") {
-    # Array-based processing for absolute normalization
-    counts_filtered <- prepare_counts_array(lung_ldm, table_s1, DOUBLETS)
-    
-    # Clear lung_ldm after array preparation
-    rm(lung_ldm)
-    gc()
-    
+  } else if (normalization_method == "proportion_ctnorm") {
+    counts_filtered <- prepare_counts_array(lung_ldm, table_s1, doublets)
     counts_long <- array_to_long(counts_filtered)
-    
-    # Clear array after conversion
-    rm(counts_filtered)
+    counts_normalized <- apply_proportion_celltype_normalization(counts_long)
+    rm(lung_ldm, counts_filtered, counts_long)
     gc()
     
-    # Apply absolute normalization
-    counts_normalized <- normalize_absolute(counts_long)
-    
-    # Clear long format data
-    rm(counts_long)
-    gc()
-    
-  } else if (normalization_method == "raw") {
-    # Array-based processing for raw normalization
-    counts_filtered <- prepare_counts_array(lung_ldm, table_s1, DOUBLETS)
-    
-    # Clear lung_ldm after array preparation
-    rm(lung_ldm)
-    gc()
-    
+  } else if (normalization_method == "sample_depth") {
+    counts_filtered <- prepare_counts_array(lung_ldm, table_s1, doublets)
     counts_long <- array_to_long(counts_filtered)
-    
-    # Clear array after conversion
-    rm(counts_filtered)
-    gc()
-    
-    # Apply raw normalization
-    counts_normalized <- normalize_raw(counts_long)
-    
-    # Clear long format data
-    rm(counts_long)
-    gc()
+    counts_normalized <- normalize_sample_depth(counts_long)
+    rm(lung_ldm, counts_filtered, counts_long); gc()
     
   } else {
     stop(paste("Unsupported normalization method:", normalization_method))
   }
   
-  # Common post-processing for all methods
-  counts_log_transformed <- apply_log_transform(counts_normalized)
-  gc()
-  
-  # Create feature identifiers
-  counts_processed_long <- create_features(counts_log_transformed, annots_list)
-  gc()
-  
-  # This creates all ablation groups
-  process_all_subsets(counts_processed_long, 
-                      CLUSTER_DEFINITIONS,
-                      GENE_SET_TYPES,
-                      hsa01100_genes,
-                      table_s1,
-                      base_output_dir)
-  
-  message(sprintf("%s preprocessing complete", normalization_method))
+  return(counts_normalized)
 }
 
+# Prepare base data for relative processing
+prepare_base_data_for_relative <- function(normalization_method, lung_ldm, table_s1, doublets) {
+  base_normalization_method <- gsub("_relative$", "", normalization_method)
+  
+  if (grepl("^cp10k", base_normalization_method)) {
+    # Use raw umitab data for CP10K methods
+    cell_metadata_filtered_df <- prepare_cell_metadata(lung_ldm, table_s1, doublets)
+    umitab_filtered <- filter_umitab(lung_ldm$dataset$umitab, cell_metadata_filtered_df)
+    result <- list(
+      type = "cell_level",
+      cell_metadata = cell_metadata_filtered_df,
+      umitab = umitab_filtered
+    )
+    rm(lung_ldm); gc()
+    
+  } else {
+    # Use aggregated counts per cell type data
+    counts_filtered <- prepare_counts_array(lung_ldm, table_s1, doublets)
+    counts_long <- array_to_long(counts_filtered)
+    result <- list(
+      type = "aggregated",
+      counts_long = counts_long
+    )
+    rm(lung_ldm, counts_filtered); gc()
+  }
+  
+  return(result)
+}
+
+# Apply post processing
+apply_global_postprocessing <- function(counts_normalized, annots_list) {
+  counts_log_transformed <- apply_log_transform(counts_normalized)
+  counts_processed_long <- create_features(counts_log_transformed, annots_list)
+  rm(counts_log_transformed) 
+  gc()
+  return(counts_processed_long)
+}
 
 # Main execution
 message("Starting preprocessing pipeline.")

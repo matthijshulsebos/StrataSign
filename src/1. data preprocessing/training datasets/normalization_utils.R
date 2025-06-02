@@ -44,7 +44,7 @@ process_sample_cluster_pair <- function(sample_id, cluster_id, cell_metadata_fil
   return(result_df)
 }
 
-# CP10K normalization (base implementation)
+# CP10K normalization
 normalize_cp10k <- function(cell_metadata_filtered_df, umitab_filtered, annots_list, DOUBLETS) {
   message("Starting CP10K normalization...")
 
@@ -98,10 +98,6 @@ normalize_cp10k <- function(cell_metadata_filtered_df, umitab_filtered, annots_l
     rm(batch_results, batch_combined)
     gc()
     
-    # Clear memory every 5 batches
-    if (batch_idx %% 5 == 0) {
-      gc()
-    }
   }
   
   message("Combining all batches...")
@@ -115,8 +111,9 @@ normalize_cp10k <- function(cell_metadata_filtered_df, umitab_filtered, annots_l
   return(aggregated_counts_long)
 }
 
+# Combination function for CP10K and cell type proportion normalization
 normalize_cp10k_celltype <- function(cell_metadata_filtered_df, umitab_filtered, annots_list, DOUBLETS) {
-  message("Performing cell type proportion normalization.")
+  message("Performing CP10K with cell type proportion normalization.")
   
   # Perform CP10K normalization
   aggregated_counts_long <- normalize_cp10k(cell_metadata_filtered_df, umitab_filtered, annots_list, DOUBLETS)
@@ -144,9 +141,34 @@ normalize_cp10k_celltype <- function(cell_metadata_filtered_df, umitab_filtered,
   return(normalized_counts)
 }
 
-normalize_absolute <- function(counts_long) {
-  message("Starting absolute normalization...")
+# Helper function to apply cell type normalization
+apply_celltype_normalization <- function(normalized_counts) {
+  # Calculate total counts per cell type and sample
+  celltype_totals <- normalized_counts %>%
+    group_by(sample_ID, cluster_ID) %>%
+    summarise(celltype_total = sum(normalized_count), .groups = 'drop')
+  
+  # Calculate global average cell type total
+  global_avg_celltype_total <- celltype_totals %>%
+    summarise(mean_total = mean(celltype_total)) %>%
+    pull(mean_total)
+  
+  # Apply cell type proportion normalization
+  counts_celltype_normalized <- normalized_counts %>%
+    left_join(celltype_totals, by = c("sample_ID", "cluster_ID")) %>%
+    mutate(
+      gene_fraction = ifelse(celltype_total > 0, normalized_count / celltype_total, 0),
+      normalized_count = gene_fraction * global_avg_celltype_total
+    ) %>%
+    select(sample_ID, gene, cluster_ID, normalized_count)
+  
+  return(counts_celltype_normalized)
+}
 
+# Helper function to apply proportion cell type normalization
+apply_proportion_celltype_normalization <- function(counts_long) {
+  message("Starting proportion normalization with cell type normalization...")
+  
   # Calculate total counts per cell type and sample
   total_counts_celltype_sample <- counts_long %>%
     group_by(sample_ID, cluster_ID) %>%
@@ -157,7 +179,7 @@ normalize_absolute <- function(counts_long) {
     summarise(mean_total = mean(total_counts_in_celltype)) %>%
     pull(mean_total)
   
-  # Normalize counts by gene fraction in cell type and multiply by global average
+  # Apply proportion with cell type normalization
   counts_normalized <- counts_long %>%
     left_join(total_counts_celltype_sample, by = c("sample_ID", "cluster_ID")) %>%
     mutate(
@@ -166,12 +188,13 @@ normalize_absolute <- function(counts_long) {
     ) %>%
     select(sample_ID, gene, cluster_ID, normalized_count)
   
-  message("Absolute normalization complete.")
+  message("Proportion normalization with cell type normalization complete.")
   return(counts_normalized)
 }
 
-normalize_raw <- function(counts_long) {
-  message("Starting raw read depth normalization...")
+# Sample depth normalization function
+normalize_sample_depth <- function(counts_long) {
+  message("Starting sample read depth normalization...")
 
   # Calculate total counts per sample
   total_counts_per_sample <- counts_long %>%
@@ -180,7 +203,7 @@ normalize_raw <- function(counts_long) {
   
   # Calculate target count as mean of total counts across samples
   target_count <- mean(total_counts_per_sample$total_counts)
-  message("Target count for read depth normalization: ", target_count)
+  message("Target count for sample depth normalization: ", target_count)
   
   # Normalize counts to be proportional to mean sample count
   counts_normalized <- counts_long %>%
@@ -191,6 +214,6 @@ normalize_raw <- function(counts_long) {
     ) %>%
     select(sample_ID, gene, cluster_ID, normalized_count)
   
-  message("Raw read depth normalization complete.")
+  message("Sample read depth normalization complete.")
   return(counts_normalized)
 }

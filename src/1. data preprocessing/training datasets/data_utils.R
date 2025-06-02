@@ -72,7 +72,7 @@ prepare_cell_metadata <- function(lung_ldm, table_s1, doublets) {
   return(cell_metadata_filtered_df)
 }
 
-# Filter UMI table for CP10K methods
+# Filter umitab for CP10K methods
 filter_umitab <- function(umitab, cell_metadata_filtered_df) {
   message("Filtering UMI table using cell metadata...")
   
@@ -91,9 +91,9 @@ filter_umitab <- function(umitab, cell_metadata_filtered_df) {
   return(umitab_filtered)
 }
 
-# Prepare 3D counts array for array-based methods
+# Prepare 3D counts array for aggregated methods
 prepare_counts_array <- function(lung_ldm, table_s1, doublets) {
-  message("Preparing counts array...")
+  message("Preparing counts array for aggregated methods...")
   
   # Extract counts from leader dataset
   counts <- lung_ldm$dataset$counts
@@ -110,9 +110,9 @@ prepare_counts_array <- function(lung_ldm, table_s1, doublets) {
   return(counts_filtered)
 }
 
-# Convert 3D array to long format
+# Convert 3D array to long format for aggregated methods
 array_to_long <- function(counts_filtered) {
-  message("Converting array to long format...")
+  message("Converting PRE-AGGREGATED array to long format for aggregated methods...")
   
   # Convert 3D array to long format
   counts_long <- as.data.frame(as.table(counts_filtered))
@@ -155,7 +155,7 @@ create_features <- function(counts_log_transformed, annots_list) {
     select(sample_ID, gene, cluster_ID, gene_cluster, log_normalized_count)
 }
 
-# Load all datasets at once for convenience
+# Load all datasets
 load_all_datasets <- function() {
   message("Loading all datasets...")
 
