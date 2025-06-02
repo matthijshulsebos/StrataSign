@@ -496,7 +496,7 @@ dev.off()
 
 # do mutational signatures analysis here:
 ########################################
-#source("scripts/mutation_signatures.R")
+source("scripts/mutation_signatures.R")
 
 
 

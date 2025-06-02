@@ -1,7 +1,7 @@
 
 
 library(scDissector)
-#library(scTools)
+library(scTools)
 library(RColorBrewer)
 library(scales)
 

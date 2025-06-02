@@ -13,8 +13,7 @@ rm(list=ls())
 ############################
 #Specify a working directory. This is the path where the data will download to, and where figures will be produced.
 # It should also be the path to the scripts from the github.
-wd <- "C:/Users/mchul/Documents/Leader_et_al"
-
+wd <- "/users/andrew leader/Downloads/Leader_et_al"
 ############################
 
 # set up the directory
@@ -126,8 +125,7 @@ figure_3def_s3i()
 
 #Gene Module analyses
 source("scripts/figure_s2fghi.R")
-# There seems to be a bug as the module DC_modules.txt does not exist
-# figure_s2fghi()
+figure_s2fghi()
 source("scripts/figure_3c_s3efgh.R")
 figure_3c_s3efgh()
 
