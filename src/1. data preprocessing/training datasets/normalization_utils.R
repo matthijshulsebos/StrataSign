@@ -1,6 +1,7 @@
 library(dplyr)
 library(tidyr)
 
+
 # Process a single sample-cluster pair for CP10K normalization
 process_sample_cluster_pair <- function(sample_id, cluster_id, cell_metadata_filtered_df, umitab_filtered, all_relevant_genes) {
   # Select all relevant cells using cell metadata
@@ -44,6 +45,7 @@ process_sample_cluster_pair <- function(sample_id, cluster_id, cell_metadata_fil
   return(result_df)
 }
 
+
 # CP10K normalization
 normalize_cp10k <- function(cell_metadata_filtered_df, umitab_filtered, annots_list, DOUBLETS) {
   message("Starting CP10K normalization...")
@@ -59,8 +61,8 @@ normalize_cp10k <- function(cell_metadata_filtered_df, umitab_filtered, annots_l
     cluster_ID = all_relevant_clusters
   )
   
-  # Process in smaller batches to manage memory
-  batch_size <- 250
+  # Set batch size
+  batch_size <- 500
   total_batches <- ceiling(nrow(sample_cluster_pairs) / batch_size)
   
   # Aggregated results list
@@ -111,6 +113,7 @@ normalize_cp10k <- function(cell_metadata_filtered_df, umitab_filtered, annots_l
   return(aggregated_counts_long)
 }
 
+
 # Combination function for CP10K and cell type proportion normalization
 normalize_cp10k_celltype <- function(cell_metadata_filtered_df, umitab_filtered, annots_list, DOUBLETS) {
   message("Performing CP10K with cell type proportion normalization.")
@@ -141,6 +144,7 @@ normalize_cp10k_celltype <- function(cell_metadata_filtered_df, umitab_filtered,
   return(normalized_counts)
 }
 
+
 # Helper function to apply cell type normalization
 apply_celltype_normalization <- function(normalized_counts) {
   # Calculate total counts per cell type and sample
@@ -164,6 +168,7 @@ apply_celltype_normalization <- function(normalized_counts) {
   
   return(counts_celltype_normalized)
 }
+
 
 # Helper function to apply proportion cell type normalization
 apply_proportion_celltype_normalization <- function(counts_long) {
@@ -191,6 +196,7 @@ apply_proportion_celltype_normalization <- function(counts_long) {
   message("Proportion normalization with cell type normalization complete.")
   return(counts_normalized)
 }
+
 
 # Sample depth normalization function
 normalize_sample_depth <- function(counts_long) {
