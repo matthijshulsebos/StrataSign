@@ -30,20 +30,21 @@ extract_path_metadata <- function(file_path, model_output_dir) {
   relative_path_str <- as.character(fs::path_rel(file_path, start = model_output_dir))
   path_parts <- strsplit(relative_path_str, "/|\\\\")[[1]]
   
+  # New path format: {normalization}/{cell_type_group}/{gene_set}/{model_algo}/feature_importance_*.csv
   metadata <- list(
-    data_type = if (length(path_parts) >= 1) path_parts[1] else NA_character_,
-    model_algo = if (length(path_parts) >= 2) path_parts[2] else NA_character_,
-    gene_set_ext = if (length(path_parts) >= 3) path_parts[3] else NA_character_, # Gene ablation group
-    cell_type_group = if (length(path_parts) >= 4) path_parts[4] else NA_character_
+    data_type = if (length(path_parts) >= 1) path_parts[1] else NA_character_,  # normalization type
+    cell_type_group = if (length(path_parts) >= 2) path_parts[2] else NA_character_,
+    gene_set_ext = if (length(path_parts) >= 3) path_parts[3] else NA_character_,
+    model_algo = if (length(path_parts) >= 4) path_parts[4] else NA_character_  # model algorithm
   )
   
-  essential_components <- c(metadata$data_type, metadata$model_algo, metadata$gene_set_ext, metadata$cell_type_group)
+  essential_components <- c(metadata$data_type, metadata$cell_type_group, metadata$gene_set_ext, metadata$model_algo)
   if(any(is.na(essential_components)) || any(sapply(essential_components, function(x) trimws(x) == ""))) {
       warning(paste0("Path component extraction failed for: '", file_path, "'. ",
                      "Extracted: dataType='", metadata$data_type, 
-                     "', modelAlgo='", metadata$model_algo, 
-                     "', geneSet='", metadata$gene_set_ext,
                      "', cellGroup='", metadata$cell_type_group, 
+                     "', geneSet='", metadata$gene_set_ext,
+                     "', modelAlgo='", metadata$model_algo, 
                      "'. Skipping this file."))
       return(NULL)
   }
@@ -231,15 +232,15 @@ plot_cumulative_importance <- function(model_output_dir,
         axis.title = element_text(size = 10)
       )
 
-    # Write file to output directory
+    # Write file to output directory - include model algorithm to prevent overwriting
     sane_data_type <- gsub("[^a-zA-Z0-9_.-]", "_", metadata$data_type)
     sane_model_algo <- gsub("[^a-zA-Z0-9_.-]", "_", metadata$model_algo)
     sane_cell_group <- gsub("[^a-zA-Z0-9_.-]", "_", metadata$cell_type_group)
     sane_gs_label <- gsub("[^a-zA-Z0-9_.-]", "_", effective_gene_set_label)
     
-    specific_output_subdir <- file.path(figures_dir, sane_data_type, sane_model_algo, 
-                                        gsub("[^a-zA-Z0-9_.-]", "_", metadata$gene_set_ext),
-                                        sane_cell_group)
+    # Include model algorithm in the path to prevent overwriting
+    specific_output_subdir <- file.path(figures_dir, sane_data_type, sane_cell_group, 
+                                        sane_gs_label, sane_model_algo)
     
     dir_creation_success <- FALSE
     tryCatch({
@@ -252,13 +253,9 @@ plot_cumulative_importance <- function(model_output_dir,
     if (!dir_creation_success) next 
 
     base_input_filename <- gsub("\\.csv$", "", basename(file_path)) 
-    plot_filename_suffix <- ""
-  
-    if (nzchar(sane_gs_label) && !grepl(sane_gs_label, base_input_filename, ignore.case = TRUE) && sane_gs_label != "unknown_geneset") {
-         plot_filename_suffix <- paste0("_gs-", sane_gs_label)
-    }
-
-    plot_filename <- paste0("cumulative_", base_input_filename, plot_filename_suffix, ".png")
+    
+    # Include model algorithm in filename as additional safeguard
+    plot_filename <- paste0("cumulative_", sane_model_algo, "_", base_input_filename, ".png")
     output_filepath <- file.path(specific_output_subdir, plot_filename)
     
     message("Attempting to save plot to: ", output_filepath)

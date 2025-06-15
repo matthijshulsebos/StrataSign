@@ -6,135 +6,202 @@ library(fs)
 library(readr)
 
 # Source utility functions for feature parsing
-# This is sourced in the main plot_intersector.R, so it might be redundant here
-# but doesn't harm if sourced again unless there are side effects in the util script.
 source("src/0. utils/feature_name_utils.R") 
 
+
+# === PLOTTING FUNCTIONS ===
+
 # Create batched lollipop plots
-# MODIFIED: Accepts processed_fold_changes instead of fold_changes_path
-create_batched_lollipop_plots <- function(all_results_data, sublineage_colors, figures_dir, batch_size = 50, max_features = 200, processed_fold_changes) {
-  if (nrow(all_results_data) == 0) {
-    message("create_batched_lollipop_plots: No all_results_data provided.")
-    return()
-  }
+create_batched_lollipop_plots <- function(all_results_data, sublineage_colors, figures_dir, batch_size = 50, max_features = 200) {
+  # Create output directory if it doesn't exist
   dir_create(figures_dir, recurse = TRUE)
-
-  # --- Normalize input data to ensure gene, sublineage, cluster_ID columns ---
-  if ("feature_id" %in% names(all_results_data)) {
-    message("INFO: Parsing from feature_id")
-    all_results_data <- all_results_data %>%
-      mutate(
-        parsed_gene = get_gene_from_feature(feature_id),
-        parsed_sublineage = get_simplified_sublineage(feature_id, default_value = NA_character_),
-        parsed_cluster_ID = get_cluster_id_from_feature(feature_id)
-      ) %>%
-      mutate(
-        gene = str_trim(tolower(parsed_gene)),
-        sublineage = parsed_sublineage,
-        cluster_ID = as.character(parsed_cluster_ID)
-      ) %>%
-      select(-starts_with("parsed_"))
-  } else {
-    message("INFO: No feature_id; using existing columns")
-    if (!"gene" %in% names(all_results_data)) {
-      message("ERROR: 'gene' missing. Aborting.")
-      return()
-    }
-    all_results_data <- all_results_data %>% mutate(gene = str_trim(tolower(gene)))
-    if (!"sublineage" %in% names(all_results_data)) all_results_data$sublineage <- NA_character_
-    if (!"cluster_ID" %in% names(all_results_data)) {
-      all_results_data$cluster_ID <- NA_character_
-    } else {
-      all_results_data$cluster_ID <- as.character(all_results_data$cluster_ID)
-    }
-  }
-  # end normalization
-
-  # prepare for fold‐change join
-  all_results_data <- all_results_data %>%
-    mutate(sublineage_from_data = str_trim(tolower(
-      get_simplified_sublineage(sublineage, default_value = "")
-    )))
-
+  
+  # Select top features based on meta_score
   top_features_data <- all_results_data %>%
     arrange(desc(meta_score)) %>%
     head(max_features)
 
-  if (nrow(top_features_data) == 0) {
-    message("No features after filtering.")
-    return()
-  }
-
-  if (is.null(processed_fold_changes) || nrow(processed_fold_changes) == 0) {
-    message("No fold‐change data; indicators will be missing.")
-    top_features_data$fold_change <- NA_real_
-  } else {
-    top_features_data <- top_features_data %>%
-      left_join(processed_fold_changes,
-                by = c("gene" = "gene", "sublineage_from_data" = "sublineage_from_fc"))
-  }
-
+  # Create display names using existing feature_id plus fold change indicator
   top_features_data <- top_features_data %>%
     mutate(
+      # Create fold change indicator arrows using the existing 'fold_change' column
       fold_change_indicator = ifelse(is.na(fold_change), "",
         ifelse(fold_change > 0, "↑", "↓")
       ),
+      
+      # Simple display name
+      display_name_base = paste0(feature_id, " ", fold_change_indicator),
+      
+      # Ensure unique display names to avoid ggplot issues
+      display_name = make.unique(as.character(display_name_base), sep = "..v"),
+      
+      # Parse sublineage for coloring
+      display_sublineage_for_color = get_simplified_sublineage(feature_id, default_value = NA_character_)
+    )
 
-      .clean_sublineage = ifelse(is.na(sublineage) |
-                                 str_trim(tolower(sublineage)) %in% c("none","", "na"),
-                                 NA_character_, sublineage),
-      display_sublineage_for_color = .clean_sublineage,
-      temp_sub = .clean_sublineage,
-      temp_clus = ifelse(is.na(cluster_ID) |
-                         str_trim(tolower(cluster_ID)) %in% c("none","", "na"),
-                         "NO_ID", cluster_ID),
-
-      full_context = case_when(
-        !is.na(temp_sub) & temp_clus != "NO_ID" ~ paste(temp_sub, temp_clus, sep = "_"),
-        !is.na(temp_sub) & temp_clus == "NO_ID" ~ paste0(temp_sub, "_NO_ID"),
-        is.na(temp_sub) & temp_clus != "NO_ID" ~ temp_clus,
-        TRUE ~ NA_character_
-      ),
-
-      display_name_base = if_else(
-        is.na(full_context),
-        paste0(gene, " ", fold_change_indicator),
-        paste0(gene, "@", full_context, " ", fold_change_indicator)
-      ),
-      display_name = make.unique(as.character(display_name_base), sep = "..v")
-    ) %>%
-    select(-starts_with("temp"), -.clean_sublineage)
-
+  # Ensure we have color mapping for sublineages
   if (is.null(sublineage_colors) || length(sublineage_colors) == 0) {
     unique_subs <- unique(top_features_data$display_sublineage_for_color[!is.na(top_features_data$display_sublineage_for_color)])
     sublineage_colors <- if (length(unique_subs)) setNames(rep("gray50", length(unique_subs)), unique_subs) else list()
   }
 
+  # Calculate number of batches needed
   num_batches <- ceiling(nrow(top_features_data) / batch_size)
+  
+  # Generate plots for each batch
   for (batch_num in 1:num_batches) {
+    # Calculate batch boundaries
     start_idx <- (batch_num - 1) * batch_size + 1
     end_idx   <- min(batch_num * batch_size, nrow(top_features_data))
 
+    # Extract and prepare batch data
     batch_features <- top_features_data[start_idx:end_idx, ] %>%
       mutate(display_name = factor(display_name, levels = display_name[order(meta_score)]))
 
+    # Create lollipop plot for this batch
     p <- ggplot(batch_features, aes(x = display_name, y = meta_score)) +
-      geom_segment(aes(xend = display_name, yend = 0, color = display_sublineage_for_color), linewidth = 1.2) +
-      geom_point(aes(size = n_models_occur, color = display_sublineage_for_color), alpha = 0.8) +
-      scale_color_manual(values = sublineage_colors, name = "Sublineage", na.value = "grey70") +
-      scale_size_continuous(range = c(2, 6), name = "# Models Occur") +
-      scale_y_continuous(limits = c(0, max(top_features_data$meta_score, na.rm = TRUE) * 1.05)) +
-      labs(title = paste0("Features ", start_idx, "-", end_idx, " by Meta-Score"),
-           x = "Feature (Gene@Sublineage_ClusterID)", y = "Meta-Score") +
+      # Add lollipop stems (lines from 0 to points)
+      geom_segment(aes(xend = display_name, yend = 0, color = display_sublineage_for_color), 
+                   linewidth = 0.8, alpha = 0.7) +
+      # Add lollipop heads (points sized by model occurrence)
+      geom_point(aes(size = n_models_occur, color = display_sublineage_for_color), 
+                 alpha = 0.9, stroke = 0.3) +
+      # Configure color and size scales with better legends
+      scale_color_manual(values = sublineage_colors, 
+                        name = "Sublineage", 
+                        na.value = "grey60",
+                        guide = guide_legend(override.aes = list(size = 3), order = 2)) +
+      scale_size_continuous(range = c(1.5, 4), 
+                           name = "Models\n(count)",
+                           breaks = function(x) pretty(x, n = 4) %>% as.integer() %>% unique(),
+                           labels = function(x) as.integer(x),
+                           guide = guide_legend(override.aes = list(alpha = 1), order = 1)) +
+      # Set y-axis limits with better formatting
+      scale_y_continuous(limits = c(0, max(top_features_data$meta_score, na.rm = TRUE) * 1.05),
+                        expand = expansion(mult = c(0, 0.02)),
+                        breaks = scales::pretty_breaks(n = 6)) +
+      # Professional axis labels
+      labs(x = "Feature", y = "Meta-Score") +
+      # Flip coordinates for horizontal lollipops
       coord_flip() +
-      theme_minimal() +
-      theme(axis.text.y = element_text(size = 9),
-            panel.grid.major.y = element_blank(),
-            legend.position = "right")
+      # Apply publication-ready theme
+      theme_classic() +
+      theme(
+        # Text styling
+        text = element_text(family = "Arial", color = "black"),
+        axis.text = element_text(size = 8, color = "black"),
+        axis.title = element_text(size = 10, color = "black", face = "bold"),
+        axis.text.y = element_text(size = 7, hjust = 1),
+        
+        # Axis styling
+        axis.line = element_line(color = "black", linewidth = 0.5),
+        axis.ticks = element_line(color = "black", linewidth = 0.3),
+        axis.ticks.length = unit(0.15, "cm"),
+        
+        # Legend styling
+        legend.position = "right",
+        legend.background = element_rect(fill = "transparent", color = "black", linewidth = 0.3),
+        legend.title = element_text(size = 9, face = "bold"),
+        legend.text = element_text(size = 8),
+        legend.key = element_rect(fill = "transparent", color = NA),
+        legend.key.size = unit(0.4, "cm"),
+        legend.margin = margin(5, 5, 5, 5),
+        legend.box.spacing = unit(0.3, "cm"),
+        
+        # Panel styling
+        panel.background = element_rect(fill = "transparent", color = NA),
+        panel.grid.major.x = element_line(color = "grey90", linewidth = 0.3, linetype = "dotted"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(),
+        
+        # Plot margins
+        plot.margin = margin(10, 15, 10, 10, "pt"),
+        
+        # Remove panel border
+        panel.border = element_blank()
+      )
 
-    filename <- paste0("top_features_lollipop_batch_", start_idx, "_to_", end_idx, ".png")
-    ggsave(file.path(figures_dir, filename), p, width = 10,
-           height = max(6, nrow(batch_features) * 0.25), limitsize = FALSE)
-    message("Saved lollipop plot: ", filename)
+    # Save plot with higher resolution and better format
+    filename <- paste0("top_features_lollipop_batch_", 
+                      sprintf("%03d", start_idx), "_to_", sprintf("%03d", end_idx), ".png")
+    plot_height <- max(4, nrow(batch_features) * 0.2)  # More compact height
+    plot_width <- 8  # Standard width for academic papers
+    
+    ggsave(
+      file.path(figures_dir, filename), 
+      plot = p, 
+      width = plot_width,
+      height = plot_height, 
+      dpi = 300, 
+      units = "in",
+      bg = "transparent", 
+      limitsize = FALSE
+    )
   }
 }
+
+
+# === MAIN LOOPING FUNCTION ===
+
+# Main unified function to run all intersector lollipop plots
+run_all_intersector_lollipop_plots <- function(
+    intersector_parent_input_dir = "output/3. intersector",
+    figures_parent_output_dir = "output/6. plots/intersector", 
+    lollipop_batch_size = 50,
+    lollipop_max_total_features = 200,
+    dataset_types_to_process = c("ctnorm_global", "ctnorm_relative", "read_depth"), 
+    cell_type_groups_to_process = c("all_clusters", "macrophages", "lcam_hi", "lcam_lo", "lcam_both"),
+    gene_sets_to_process = c("metabolic", "nonmetabolic", "random")
+) {
+  
+  # Load sublineage color map
+  sublineage_color_map_path <- "output/3. intersector/sublineage_colors.rds"
+  loaded_sublineage_colors <- NULL
+  loaded_sublineage_colors <- readRDS(sublineage_color_map_path)
+
+  # Process all combinations
+  for (type in dataset_types_to_process) {
+    for (cell_type_group in cell_type_groups_to_process) {
+      for (gene_set in gene_sets_to_process) {
+        message(paste0("\nProcessing dataset type: ", type, 
+                       ", Cell Type Group: ", cell_type_group,
+                       ", Gene Set: ", gene_set))
+
+        current_input_dir <- file.path(intersector_parent_input_dir, type, cell_type_group, gene_set)
+        current_figures_output_dir <- file.path(figures_parent_output_dir, type, cell_type_group, gene_set)
+        dir_create(current_figures_output_dir, recurse = TRUE)
+
+        meta_scores_file <- file.path(current_input_dir, "meta_scores.csv")
+        
+        all_results <- read_csv(meta_scores_file, show_col_types = FALSE)
+
+        # Create lollipop plots
+        if (nrow(all_results) > 0) { 
+          # Ensure 'fold_change' column exists, if not, add it as NA
+          if (!"fold_change" %in% names(all_results)) {
+            all_results <- all_results %>% mutate(fold_change = NA_real_)
+            message(paste("Warning: 'fold_change' column not found in", meta_scores_file, "- adding it as NA."))
+          }
+          
+          lollipop_batches_dir_path <- file.path(current_figures_output_dir, "lollipop_batches")
+          create_batched_lollipop_plots(
+            all_results_data = all_results,
+            sublineage_colors = loaded_sublineage_colors, 
+            figures_dir = lollipop_batches_dir_path, 
+            batch_size = lollipop_batch_size,
+            max_features = lollipop_max_total_features
+          )
+        }
+        
+        message("Lollipop plots for ", type, " normalization", cell_type_group, " cell types", gene_set, "genes.")
+      }
+    }
+  }
+  
+  message("\nFinished generating all intersector lollipop plots.")
+}
+
+# === EXECUTE LOLLIPOP PLOTTING ===
+
+run_all_intersector_lollipop_plots()
+  

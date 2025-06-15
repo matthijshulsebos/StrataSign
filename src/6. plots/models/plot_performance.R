@@ -6,305 +6,380 @@ library(viridis)
 library(stringr)
 library(patchwork)
 
-# Helper function to safely save plots without fs package
+# Helper function to safely save plots
 safe_save_plot <- function(plot, filename, width = 8, height = 6) {
-  full_path <- normalizePath(filename, mustWork = FALSE)
-  
-  # Use base R directory creation instead of fs::dir_create
-  dir.create(dirname(full_path), recursive = TRUE, showWarnings = FALSE)
-  
-  message("Saving plot to: ", full_path)
-  
-  # Save the plot
-  png(full_path, width = width * 300, height = height * 300, res = 300)
-  print(plot)
-  dev.off()
-}
+  if (is.null(plot)) {
+    message("Error in safe_save_plot: Plot object is NULL. Cannot save.")
+    return()
+  }
+  if (!inherits(plot, "ggplot")) {
+    message("Error in safe_save_plot: Object to save is not a ggplot object. Cannot save.")
+    return()
+  }
 
-compare_model_performances <- function() {
-  # Use absolute paths for everything
-  base_dir <- normalizePath(".", winslash = "/")
-  output_dir <- file.path(base_dir, "output/figures/performance")
+  full_path <- normalizePath(filename, mustWork = FALSE)
+  dir_creation_success <- dir.create(dirname(full_path), recursive = TRUE, showWarnings = FALSE)
   
-  # Use base R for directory creation
-  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-  
-  # Find all performance summary files (using list.files instead of dir_ls)
-  models_dir <- file.path(base_dir, "output/models")
-  perf_pattern <- "*_performance_summary.csv"
-  
-  # Use base R to find files
-  all_files <- list.files(models_dir, 
-                         pattern = perf_pattern, 
-                         recursive = TRUE, 
-                         full.names = TRUE)
-  
-  message(paste("Found", length(all_files), "performance summary files"))
-  
-  # Load and combine all performance data
-  all_performance <- data.frame()
-  for (file in all_files) {
-    # Extract model name from path
-    model_dir <- dirname(file)
-    model_name <- basename(model_dir)
-    
-    # Read data
-    perf_data <- read_csv(file, show_col_types = FALSE)
-    perf_data$Model <- model_name
-    
-    # Append to combined dataset
-    all_performance <- bind_rows(all_performance, perf_data)
+  if (dir_creation_success) {
+    message("Directory ensured/created: ", dirname(full_path))
+  } else {
+    # This case might not be hit if showWarnings is FALSE and dir already exists,
+    # but good to have a conceptual check.
+    # A more robust check is to see if the directory now exists.
+    if (!dir.exists(dirname(full_path))) {
+        message("Error in safe_save_plot: Failed to create directory: ", dirname(full_path))
+        return()
+    } else {
+        message("Directory already existed or was created: ", dirname(full_path))
+    }
   }
   
-  # Process data
-  all_performance <- all_performance %>%
+  png_file_path <- paste0(full_path, ".png")
+  pdf_file_path <- paste0(full_path, ".pdf")
+  
+  message("Attempting to save PNG to: ", png_file_path)
+  message("Attempting to save PDF to: ", pdf_file_path)
+  
+  # Save PNG
+  tryCatch({
+    png(png_file_path, width = width * 300, height = height * 300, res = 300)
+    print(plot)
+    dev.off()
+    message("Successfully saved PNG: ", png_file_path)
+  }, error = function(e_png) {
+    message("Error saving PNG to ", png_file_path, ": ", e_png$message)
+    if (exists("dev.off") && !is.null(dev.list())) dev.off() # Ensure device is closed on error
+  })
+  
+  # Save PDF
+  tryCatch({
+    pdf(pdf_file_path, width = width, height = height)
+    print(plot)
+    dev.off()
+    message("Successfully saved PDF: ", pdf_file_path)
+  }, error = function(e_pdf) {
+    message("Error saving PDF to ", pdf_file_path, ": ", e_pdf$message)
+    if (exists("dev.off") && !is.null(dev.list())) dev.off() # Ensure device is closed on error
+  })
+}
+
+# Load and clean model performance data
+load_model_performance <- function(file_path = "output/2. models/model_performance.csv") {
+  message("Loading model performance data from: ", file_path)
+  
+  if (!file.exists(file_path)) {
+    message("Error in load_model_performance: File not found at: ", file_path)
+    return(NULL) # Return NULL if file doesn't exist
+  }
+  
+  perf_data <- read_csv(file_path, show_col_types = FALSE)
+  
+  if (nrow(perf_data) == 0) {
+    message("Warning in load_model_performance: Loaded data has 0 rows from: ", file_path)
+    # Still return the empty dataframe for downstream checks if needed
+  }
+  
+  # Clean and filter the data
+  clean_data <- perf_data %>%
+    filter(Model != "unknown", Dataset != "unknown", Cell_Type != "unknown", Gene_Set != "unknown") %>%
     mutate(
-      Gene_Set = case_when(
-        endsWith(Dataset, "_metabolic") ~ "metabolic",
-        endsWith(Dataset, "_nonmetabolic") ~ "nonmetabolic",
-        endsWith(Dataset, "_random") ~ "random",
-        TRUE ~ "unknown"
+      # Clean model names
+      Model = case_when(
+        str_to_lower(Model) == "lightgbm" ~ "LightGBM",
+        str_to_lower(Model) == "xgboost" ~ "XGBoost",
+        str_to_lower(Model) == "randomforest" ~ "Random Forest",
+        str_to_lower(Model) == "elasticnet" ~ "Elastic Net",
+        str_to_lower(Model) == "spls" ~ "sPLS",
+        str_to_lower(Model) == "svm_rbf" ~ "SVM (RBF)",
+        str_to_lower(Model) == "svm_linear" ~ "SVM (Linear)",
+        TRUE ~ str_to_title(Model)
       ),
-      Cluster = case_when(
-        startsWith(Dataset, "lcam_hi_") ~ "lcam_hi",
-        startsWith(Dataset, "lcam_lo_") ~ "lcam_lo",
-        startsWith(Dataset, "lcam_both_") ~ "lcam_both",
-        startsWith(Dataset, "all_clusters_") ~ "all_clusters",
-        TRUE ~ "other"
+      # Clean dataset names for normalization comparison
+      Dataset = case_when(
+        Dataset == "cp10k" ~ "CP10K (Raw)",
+        Dataset == "cp10k_ctnorm" ~ "CP10K (CT-norm)",
+        Dataset == "cp10k_ctnorm_relative" ~ "CP10K (CT-norm Rel)",
+        Dataset == "proportion_ctnorm" ~ "Proportion (CT-norm)",
+        Dataset == "proportion_ctnorm_relative" ~ "Proportion (CT-norm Rel)",
+        TRUE ~ Dataset
+      ),
+      # Clean cell type names
+      Cell_Type = case_when(
+        Cell_Type == "all_clusters" ~ "All Cell Types",
+        Cell_Type == "lcam_both" ~ "LCAM (Both)",
+        Cell_Type == "lcam_lo" ~ "LCAM (Low)",
+        Cell_Type == "lcam_hi" ~ "LCAM (High)",
+        Cell_Type == "macrophages" ~ "Macrophages",
+        TRUE ~ str_to_title(Cell_Type)
+      ),
+      # Clean gene set names
+      Gene_Set = case_when(
+        Gene_Set == "metabolic" ~ "Metabolic",
+        Gene_Set == "nonmetabolic" ~ "Non-metabolic",
+        Gene_Set == "random" ~ "Random",
+        TRUE ~ str_to_title(Gene_Set)
       )
     )
   
-  # 1. RESTORED: Create bar chart comparison of key metrics
-  key_metrics_plot <- all_performance %>%
-    pivot_longer(cols = c("Accuracy", "F1_score", "ROC_AUC"), 
-                 names_to = "Metric", values_to = "Value") %>%
+  message(sprintf("Loaded %d model performance records", nrow(clean_data)))
+  return(clean_data)
+}
+
+# Create normalization method comparison plots
+create_normalization_comparison_plots <- function(perf_data, output_dir) {
+  
+  # Filter for metabolic genes and all clusters
+  filtered_data <- perf_data %>%
+    filter(Gene_Set == "Metabolic", Cell_Type == "All Cell Types")
+  
+  if (nrow(filtered_data) == 0) {
+    message("No data found for Metabolic genes with All Cell Types for normalization comparison")
+    return(list())
+  }
+  
+  # Single plot: AUC by normalization method with barplot and points
+  p1 <- filtered_data %>%
+    ggplot(aes(x = Dataset, y = AUC, fill = Dataset)) +
+    geom_boxplot(alpha = 0.7) +
+    geom_point(position = position_jitter(width = 0.2), alpha = 0.8, size = 2) +
+    scale_fill_viridis_d() +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "none"
+    ) +
+    labs(
+      title = "Model AUC by Normalization Method",
+      subtitle = "Metabolic genes, All cell types",
+      x = "Normalization Method",
+      y = "AUC"
+    )
+  
+  safe_save_plot(p1, file.path(output_dir, "normalization_auc_comparison"), width = 10, height = 6)
+  
+  message("Created normalization comparison plot for metabolic genes with all cell types")
+  
+  return(list(auc_comparison = p1))
+}
+
+# Create model performance summary plots
+create_model_performance_summary_plot <- function(perf_data, output_dir, target_dataset = "ctnorm_global") { # Changed default
+  # Filter for the specified dataset, all cell types, and metabolic genes
+  message(sprintf("Filtering model performance summary for Dataset: %s, Cell Type: All Cell Types, Gene Set: Metabolic", target_dataset))
+  
+  # Diagnostic: Print unique values before filtering
+  if (!is.null(perf_data) && nrow(perf_data) > 0) {
+    message("Unique 'Dataset' values in perf_data before filtering:")
+    print(unique(perf_data$Dataset))
+    message("Unique 'Cell_Type' values in perf_data before filtering:")
+    print(unique(perf_data$Cell_Type))
+    message("Unique 'Gene_Set' values in perf_data before filtering:")
+    print(unique(perf_data$Gene_Set))
+  } else {
+    message("perf_data is NULL or empty before filtering in create_model_performance_summary_plot.")
+    return(list(plot = NULL, data = NULL))
+  }
+
+  filtered_data <- perf_data %>%
+    filter(
+      Dataset == target_dataset, 
+      Cell_Type == "All Cell Types", 
+      Gene_Set == "Metabolic"
+    )
+  
+  if (nrow(filtered_data) == 0) {
+    message(sprintf("No data found for the specified filters for model performance summary (Dataset: %s, Cell_Type: All Cell Types, Gene_Set: Metabolic)", target_dataset))
+    return(list(plot = NULL, data = NULL)) # Return NULL for data as well
+  }
+  
+  # Order models by median AUC (or another primary metric like F1_Score)
+  # Ensure AUC column exists and has non-NA values for ordering
+  if ("AUC" %in% names(filtered_data) && sum(!is.na(filtered_data$AUC)) > 0) {
+    model_order <- filtered_data %>%
+      group_by(Model) %>%
+      summarise(median_auc = median(AUC, na.rm = TRUE)) %>%
+      arrange(desc(median_auc)) %>%
+      pull(Model)
+    
+    filtered_data <- filtered_data %>%
+      mutate(Model = factor(Model, levels = model_order))
+  } else {
+    message("AUC not available for ordering models or all AUC values are NA. Models will be ordered alphabetically.")
+    # Fallback to alphabetical order if AUC is not suitable for ordering
+    model_order <- sort(unique(filtered_data$Model))
+    filtered_data <- filtered_data %>%
+      mutate(Model = factor(Model, levels = model_order))
+  }
+
+  # Select and pivot longer for key performance metrics
+  metrics_to_plot <- c("AUC", "Accuracy", "F1_Score", "Precision", "Recall", 
+                       "Balanced_Accuracy", "Specificity", "MCC")
+  
+  # Check if all metric columns exist
+  existing_metrics <- metrics_to_plot[metrics_to_plot %in% names(filtered_data)]
+  
+  if(length(existing_metrics) == 0) {
+    message(sprintf("None of the specified metrics (%s) found in the data for model performance summary.", paste(metrics_to_plot, collapse=", ")))
+    return(list(plot = NULL, data = filtered_data)) # Return filtered_data for inspection
+  }
+  
+  if(length(existing_metrics) < length(metrics_to_plot)) {
+    message(sprintf("Warning: Not all specified metrics found. Plotting available metrics: %s", paste(existing_metrics, collapse=", ")))
+  }
+
+  long_data <- filtered_data %>%
+    dplyr::select(Model, all_of(existing_metrics)) %>% # Explicitly use dplyr::select
+    pivot_longer(cols = all_of(existing_metrics), names_to = "Metric", values_to = "Value") %>%
+    mutate(Metric = factor(Metric, levels = existing_metrics)) # Maintain order
+
+  # Determine if coordinates will be flipped
+  will_flip_coords <- length(unique(long_data$Model)) > 5
+
+  # Create faceted bar plot
+  p_summary <- long_data %>%
     ggplot(aes(x = Model, y = Value, fill = Model)) +
-    geom_bar(stat = "identity", position = "dodge") +
-    facet_grid(Metric ~ Dataset) +
-    theme_minimal() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1),
-          legend.position = "bottom") +
-    labs(title = "Model Performance Comparison", 
-         subtitle = "Showing Accuracy, F1 Score, and ROC AUC metrics",
-         y = "Score Value (higher is better)", 
-         x = "Model") +
-    scale_fill_viridis_d()
-  
-  # Save key metrics plot
-  safe_save_plot(
-    key_metrics_plot, 
-    file.path(output_dir, "all_metrics_by_model.png"),
-    width = 12,
-    height = 10
-  )
-  
-  # 2. RESTORED: Precision vs Recall plot
-  precision_recall_plot <- all_performance %>%
-    filter(!is.na(Precision) & !is.na(Recall)) %>%
-    ggplot(aes(x = Recall, y = Precision, color = Model)) +
-    geom_point(size = 3) + 
-    facet_wrap(~ Gene_Set) +
-    theme_minimal() +
-    labs(title = "Precision vs Recall by Model", 
-         x = "Recall", 
-         y = "Precision") +
-    scale_color_viridis_d()
-  
-  # Save precision-recall plot
-  safe_save_plot(
-    precision_recall_plot, 
-    file.path(output_dir, "precision_vs_recall.png"),
-    width = 10,
-    height = 8
-  )
-  
-  # 3. Metabolic gene accuracy heatmap
-  metabolic_accuracy_heatmap <- all_performance %>%
-    filter(Gene_Set == "metabolic") %>%
-    select(Dataset, Model, Accuracy, Cluster) %>%
-    ggplot(aes(x = Model, y = Cluster, fill = Accuracy)) +
-    geom_tile(color = "white", size = 0.5) +
-    geom_text(aes(label = round(Accuracy, 2)), color = "black", size = 3.5) +
-    scale_fill_gradient2(low = "white", mid = "#56B4E9", high = "#0072B2", 
-                        midpoint = 0.85, limits = c(0.7, 1), name = "Accuracy") +
-    theme_minimal() +
+    geom_col(alpha = 0.8, position = position_dodge(width = 0.9)) 
+
+  if (will_flip_coords) {
+    p_summary <- p_summary + 
+      geom_text(aes(label = round(Value, 3)), 
+                position = position_dodge(width = 0.9), 
+                hjust = -0.1, # Adjust for horizontal bars (text to the right)
+                size = 2.5) +
+      coord_flip()
+  } else {
+    p_summary <- p_summary +
+      geom_text(aes(label = round(Value, 3)), 
+                position = position_dodge(width = 0.9), 
+                vjust = -0.25, # Adjust for vertical bars (text above)
+                size = 2.5)
+  }
+
+  p_summary <- p_summary +
+    facet_wrap(~ Metric, scales = "free_y", ncol = 4) + 
+    scale_fill_viridis_d() +
+    scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) + # Expands y-axis (or new x-axis if flipped) for text
+    theme_bw() + 
     theme(
-      axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
-      axis.text.y = element_text(face = "bold"),
-      plot.title = element_text(size = 14, face = "bold"),
-      legend.position = "right"
+      axis.text.x = if (will_flip_coords) element_text(angle = 0, hjust = 0.5) else element_text(angle = 45, hjust = 1),
+      axis.text.y = if (will_flip_coords) element_text(angle = 0, hjust = 1) else waiver(), 
+      legend.position = "none", 
+      strip.text = element_text(face = "bold"),
+      panel.grid.minor = element_blank(), 
+      panel.grid.major.x = if (will_flip_coords) element_line() else element_blank(), 
+      panel.grid.major.y = if (will_flip_coords) element_blank() else element_line()  
     ) +
-    labs(
-      title = "Model Accuracy for Metabolic Genes",
-      x = NULL,
-      y = NULL
+    labs( # Removed title and subtitle
+      x = "Model",
+      y = "Metric Value"
     )
   
-  # Save metabolic heatmap
-  safe_save_plot(
-    metabolic_accuracy_heatmap, 
-    file.path(output_dir, "metabolic_accuracy_heatmap.png"),
-    width = 8,
-    height = 6
-  )
+  # Adjust width based on number of metrics; e.g. 3-4 metrics per row in facet_wrap
+  num_metrics <- length(existing_metrics)
+  plot_width <- ifelse(num_metrics > 5, 15, 12) # Increase width if many metrics
+  plot_height <- ifelse(num_metrics > 3, 10, 8) # Increase height if many metrics in multiple rows
+
+  safe_save_plot(p_summary, file.path(output_dir, sprintf("model_performance_summary_%s_ordered", gsub("[^a-zA-Z0-9_]", "_", target_dataset))), width = plot_width, height = plot_height)
   
-  # 4. Nonmetabolic gene accuracy heatmap
-  nonmetabolic_accuracy_heatmap <- all_performance %>%
-    filter(Gene_Set == "nonmetabolic") %>%
-    select(Dataset, Model, Accuracy, Cluster) %>%
-    ggplot(aes(x = Model, y = Cluster, fill = Accuracy)) +
-    geom_tile(color = "white", size = 0.5) +
-    geom_text(aes(label = round(Accuracy, 2)), color = "black", size = 3.5) +
-    scale_fill_gradient2(low = "white", mid = "#56B4E9", high = "#0072B2", 
-                        midpoint = 0.85, limits = c(0.7, 1), name = "Accuracy") +
-    theme_minimal() +
-    theme(
-      axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
-      axis.text.y = element_text(face = "bold"),
-      plot.title = element_text(size = 14, face = "bold"),
-      legend.position = "right"
-    ) +
-    labs(
-      title = "Model Accuracy for Non-metabolic Genes",
-      x = NULL,
-      y = NULL
-    )
+  message(sprintf("Created model performance summary plot for Dataset: %s (Models ordered).", target_dataset))
   
-  # Save nonmetabolic heatmap
-  safe_save_plot(
-    nonmetabolic_accuracy_heatmap, 
-    file.path(output_dir, "nonmetabolic_accuracy_heatmap.png"),
-    width = 8,
-    height = 6
-  )
+  return(list(plot = p_summary, data = filtered_data)) # Return both plot and data
+}
+
+
+# Main function
+generate_performance_plots <- function(performance_file = "output/2. models/model_performance.csv",
+                                       focused_dataset = "ctnorm_global") { # Changed default
+  # Define project root explicitly to ensure correct path construction
+  # Adjust this path if your project root is different.
+  project_root <- "c:/Users/mchul/Documents/StrataSign" 
   
-  # 5. Random gene accuracy heatmap
-  random_accuracy_heatmap <- all_performance %>%
-    filter(Gene_Set == "random") %>%
-    select(Dataset, Model, Accuracy, Cluster) %>%
-    ggplot(aes(x = Model, y = Cluster, fill = Accuracy)) +
-    geom_tile(color = "white", size = 0.5) +
-    geom_text(aes(label = round(Accuracy, 2)), color = "black", size = 3.5) +
-    scale_fill_gradient2(low = "white", mid = "#56B4E9", high = "#0072B2", 
-                        midpoint = 0.85, limits = c(0.7, 1), name = "Accuracy") +
-    theme_minimal() +
-    theme(
-      axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
-      axis.text.y = element_text(face = "bold"),
-      plot.title = element_text(size = 14, face = "bold"),
-      legend.position = "right"
-    ) +
-    labs(
-      title = "Model Accuracy for Random Genes",
-      x = NULL,
-      y = NULL
-    )
+  # Setup output directory using the explicit project root
+  output_dir <- file.path(project_root, "output/6. plots/performance")
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  message(sprintf("Ensuring output directory exists: %s", normalizePath(output_dir, mustWork = FALSE)))
+
+  # Test directory writability
+  dummy_file_path <- file.path(output_dir, "write_test.tmp")
+  can_write <- tryCatch({
+    writeLines("test", dummy_file_path)
+    if (file.exists(dummy_file_path)) {
+      file.remove(dummy_file_path)
+      TRUE
+    } else {
+      FALSE
+    }
+  }, error = function(e) {
+    FALSE
+  })
   
-  # Save random heatmap
-  safe_save_plot(
-    random_accuracy_heatmap, 
-    file.path(output_dir, "random_accuracy_heatmap.png"),
-    width = 8,
-    height = 6
-  )
-  
-  # 6. RESTORED: Cluster-specific bar charts comparing gene sets
-  clusters <- unique(all_performance$Cluster)
-  for(cluster in clusters) {
-    # Skip invalid clusters
-    if(is.na(cluster) || cluster == "other") next
-    
-    # Filter for current cluster
-    cluster_data <- all_performance %>% 
-      filter(Cluster == cluster)
-    
-    # Create bar chart for this cluster
-    cluster_plot <- cluster_data %>%
-      pivot_longer(cols = c("Accuracy", "F1_score", "ROC_AUC"), 
-                   names_to = "Metric", values_to = "Value") %>%
-      ggplot(aes(x = Model, y = Value, fill = Gene_Set)) +
-      geom_bar(stat = "identity", position = "dodge") +
-      facet_wrap(~ Metric, ncol = 1) +
-      theme_minimal() +
-      theme(
-        axis.text.x = element_text(angle = 45, hjust = 1),
-        plot.title = element_text(size = 14, face = "bold"),
-        legend.title = element_blank(),
-        legend.position = "top"
-      ) +
-      labs(
-        title = paste(cluster, "Performance"),
-        y = "Score", 
-        x = NULL
-      ) +
-      scale_fill_viridis_d()
-    
-    # Save cluster plot
-    safe_save_plot(
-      cluster_plot,
-      file.path(output_dir, paste0("cluster_performance_", cluster, ".png")),
-      width = 10,
-      height = 8
-    )
+  if (can_write) {
+    message("Successfully tested write access to output directory: ", output_dir)
+  } else {
+    message("Error: Failed to write to output directory: ", output_dir, ". Check permissions.")
+    # Optionally, you might want to stop execution if writing is not possible
+    # return(NULL) 
+  }
+
+  # Adjust performance_file path to be relative to project_root if it's not absolute
+  # Assuming performance_file is relative to project_root if not an absolute path
+  if (!file.exists(performance_file) && !startsWith(performance_file, "/") && !grepl("^[A-Za-z]:", performance_file)) {
+    performance_file_path <- file.path(project_root, performance_file)
+  } else {
+    performance_file_path <- performance_file
   }
   
-  # 7. RESTORED: Gene set-specific bar charts (one file per gene set)
-  gene_sets <- unique(all_performance$Gene_Set)
-  for(gene_set in gene_sets) {
-    # Skip invalid gene sets
-    if(is.na(gene_set) || gene_set == "unknown") next
-    
-    # Filter for current gene set
-    gene_set_data <- all_performance %>% 
-      filter(Gene_Set == gene_set)
-    
-    # Create simplified bar chart for this gene set
-    gene_set_plot <- gene_set_data %>%
-      pivot_longer(cols = c("Accuracy", "F1_score", "ROC_AUC"), 
-                  names_to = "Metric", values_to = "Value") %>%
-      ggplot(aes(x = Model, y = Value, fill = Cluster)) +
-      geom_bar(stat = "identity", position = "dodge") +
-      facet_wrap(~ Metric, ncol = 1) +
-      theme_minimal() +
-      theme(
-        axis.text.x = element_text(angle = 45, hjust = 1),
-        plot.title = element_text(size = 14, face = "bold"),
-        legend.title = element_blank(),
-        legend.position = "top"
-      ) +
-      labs(
-        title = paste(gene_set, "Genes"),
-        y = "Score", 
-        x = NULL
-      ) +
-      scale_fill_viridis_d()
-    
-    # Save gene set plot
-    safe_save_plot(
-      gene_set_plot,
-      file.path(output_dir, paste0("geneset_performance_", gene_set, ".png")),
-      width = 10,
-      height = 8
-    )
+  if (!file.exists(performance_file_path)) {
+    message(sprintf("Critical Error: Performance data file not found at resolved path: %s. Exiting.", normalizePath(performance_file_path, mustWork = FALSE)))
+    return(NULL)
+  }
+  message(sprintf("Using performance file: %s", normalizePath(performance_file_path, mustWork = FALSE)))
+  
+  # Load and process data
+  perf_data <- load_model_performance(performance_file_path)
+  
+  if (is.null(perf_data) || nrow(perf_data) == 0) {
+    message("No performance data loaded. Exiting.")
+    return(NULL)
   }
   
-  # 8. Create best models summary
-  best_models <- all_performance %>%
-    group_by(Dataset) %>%
-    summarize(
-      Best_Accuracy_Model = Model[which.max(Accuracy)],
-      Best_Accuracy = max(Accuracy),
-      Best_F1_Model = Model[which.max(F1_score)],
-      Best_F1 = max(F1_score),
-      Best_AUC_Model = Model[which.max(ROC_AUC)],
-      Best_AUC = max(ROC_AUC)
-    )
+  # Create normalization comparison plots (Commented out as per user focus)
+  # message("Creating normalization method comparison plots...")
+  # norm_plots <- create_normalization_comparison_plots(perf_data, output_dir)
   
-  # Save summary
-  write_csv(best_models, file.path(output_dir, "best_models_summary.csv"))
+  # Create model performance summary plot for the focused dataset
+  message(sprintf("Creating model performance summary plot for dataset: %s, All Cell Types, Metabolic gene set...", focused_dataset))
+  summary_output <- create_model_performance_summary_plot(perf_data, output_dir, target_dataset = focused_dataset)
   
-  message("Performance visualization complete. Results saved to ", output_dir)
+  model_summary_plot <- NULL
+  if (!is.null(summary_output) && !is.null(summary_output$plot)) {
+    model_summary_plot <- summary_output$plot
+    
+    # Save the filtered data used for this plot
+    if (!is.null(summary_output$data) && nrow(summary_output$data) > 0) {
+      focused_data_filename <- file.path(output_dir, sprintf("focused_plot_data_%s.csv", gsub("[^a-zA-Z0-9_]", "_", focused_dataset)))
+      tryCatch({
+        write_csv(summary_output$data, focused_data_filename)
+        message(sprintf("Saved focused data for summary plot to: %s", normalizePath(focused_data_filename, mustWork=FALSE)))
+      }, error = function(e) {
+        message(sprintf("Error saving focused data to CSV: %s", e$message))
+      })
+    }
+  } else {
+    message("Model performance summary plot or its data was not generated.")
+  }
+  
+  message("Performance plot generation complete!")
+  message(sprintf("Output artifacts (plots, specific data subsets) saved to: %s", output_dir))
+  
+  # Return list, adjusted to reflect focus
+  return(list(data = perf_data, model_summary_plot = model_summary_plot))
 }
 
 # Run the analysis
-compare_model_performances()
+if (interactive() || !exists(".performance_analysis_sourced")) {
+  .performance_analysis_sourced <- TRUE # Changed variable name
+  # You can change "ctnorm_global" to any other dataset name present in your cleaned data
+  # (e.g., "ctnorm_relative", "read_depth") based on the diagnostic output.
+  performance_results <- generate_performance_plots(focused_dataset = "ctnorm_global") # Changed to an available dataset
+}

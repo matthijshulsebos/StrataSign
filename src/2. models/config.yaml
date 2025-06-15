@@ -1,17 +1,15 @@
 training_parameters:
   # Choose the type of normalization to apply to the data
   norm_type:
-    raw: true
-    absolute: true
-    relative: false
-    cp10k: true
-    cp10k_ctnorm: true
+    ctnorm_global: true
+    ctnorm_relative: true
+    read_depth: true
 
   # Choose the type of genes to include in the training
   gene_type:
     metabolic: true
-    nonmetabolic: false
-    random: false
+    nonmetabolic: true
+    random: true
 
   # Choose the types of cells to train on
   cell_type:

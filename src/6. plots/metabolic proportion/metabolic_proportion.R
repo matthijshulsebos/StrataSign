@@ -12,8 +12,8 @@ metabolic_genes_csv_path <- "output/1. data preprocessing/kegg/hsa01100_genes.cs
 # Path for sample metadata
 table_s1_path <- "base/input_tables/table_s1_sample_table.csv"
 # Output directory and plot name
-output_figure_dir <- "output/6. plots/exploratory" 
-output_plot_name <- "metabolic_gene_proportions_by_tissue_from_lung_ldm.png"
+output_figure_dir <- "output/6. plots/metabolic proportion" 
+output_plot_name <- "metabolic_proportion_boxplot.png" # Updated plot name
 
 # Doublet clusters to be removed (from preprocess_relative.R)
 DOUBLETS <- c(3, 4, 6, 12, 15, 21, 22, 24, 26, 27, 60)
@@ -138,32 +138,40 @@ proportion_data_with_tissue$tissue <- factor(proportion_data_with_tissue$tissue,
 message("Proportion data with tissue calculated:")
 print(head(proportion_data_with_tissue))
 
-# --- Plot Proportions ---
-message("Generating plot...")
-plot_title <- "Proportion of Metabolic Gene Counts per Sample by Tissue"
+# Filter data for Normal and Tumor tissues for the boxplot
+proportion_data_for_boxplot <- proportion_data_with_tissue %>%
+  filter(tissue %in% c("Normal", "Tumor")) %>%
+  droplevels() # Drop unused factor levels like "Metastasis"
 
-p <- ggplot(proportion_data_with_tissue, aes(x = reorder(sample, proportion_metabolic), y = proportion_metabolic, fill = tissue)) +
-  geom_bar(stat = "identity") +
+message("Data filtered for Normal vs Tumor boxplot:")
+print(head(proportion_data_for_boxplot))
+
+# --- Plot Proportions ---
+message("Generating boxplot...")
+plot_title <- "Metabolic Gene Proportion: Normal vs Tumor Tissue"
+
+p <- ggplot(proportion_data_for_boxplot, aes(x = tissue, y = proportion_metabolic, fill = tissue)) +
+  geom_boxplot(width = 0.5) + # Added geom_boxplot
   scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
   scale_fill_manual(name = "Tissue Type", 
-                    values = c("Normal" = "skyblue", "Tumor" = "salmon", "Metastasis" = "lightgreen"),
-                    na.value = "grey50") + # Should not have NAs if filtering worked
+                    values = c("Normal" = "skyblue", "Tumor" = "salmon"), # Adjusted for Normal and Tumor
+                    na.value = "grey50") + 
   labs(
     title = plot_title,
-    x = "Sample",
+    x = "Tissue Type", # Updated x-axis label
     y = "Proportion of Metabolic Gene Counts"
   ) +
   theme_minimal(base_size = 12) +
   theme(
-    axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1, size = 7), # Reduced size for many samples
+    axis.text.x = element_text(size = 11), # Adjusted for tissue types
     plot.title = element_text(hjust = 0.5, size=14),
-    panel.grid.major.x = element_blank(),
+    panel.grid.major.x = element_blank(), 
     panel.grid.minor.y = element_blank(),
-    legend.position = "top"
+    legend.position = "none" # Fill is redundant with x-axis for boxplot
   )
 
 # Save the plot
-ggsave(output_plot_path, plot = p, width = 14, height = 8, dpi = 300) # Increased width for more samples
+ggsave(output_plot_path, plot = p, width = 7, height = 6, dpi = 300) # Adjusted width/height for boxplot
 message(paste("Plot saved to:", output_plot_path))
 
 message("Script finished.")

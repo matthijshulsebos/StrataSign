@@ -11,7 +11,7 @@ source("src/0. utils/format_utils.R")
 # Set paths and parameters
 INTERSECTOR_PARENT_INPUT_DIR <- "output/3. intersector"
 PATHWAY_MAPPING_OUTPUT_PARENT_DIR <- "output/5. pathway enrichment"
-DATASET_TYPES_TO_PROCESS <- c("absolute", "relative")
+DATASET_TYPES_TO_PROCESS <- c("ctnorm_global", "ctnorm_relative", "read_depth")
 KEGG_ORGANISM_CODE <- "hsa"
 METABOLIC_PATHWAYS_FILE <- "output/1. data preprocessing/kegg/hsa01100_rel_pathways.csv"
 
@@ -107,70 +107,102 @@ metabolic_pathways <- load_metabolic_pathways(METABOLIC_PATHWAYS_FILE)
 # Set output dir
 dir_create(PATHWAY_MAPPING_OUTPUT_PARENT_DIR, recurse = TRUE)
 
-# Main loop to process each dataset type
+# Main loop to process each dataset type (normalization method)
 for (current_dataset_type in DATASET_TYPES_TO_PROCESS) {
-  type_specific_output_dir <- file.path(PATHWAY_MAPPING_OUTPUT_PARENT_DIR, current_dataset_type)
-  dir_create(type_specific_output_dir, recurse = TRUE)
-
-  # Detect all sublineages dynamically
+  message(paste("Processing dataset type:", current_dataset_type))
+  
   dataset_type_dir <- file.path(INTERSECTOR_PARENT_INPUT_DIR, current_dataset_type)
   if (!dir.exists(dataset_type_dir)) {
     warning(paste("Dataset type directory not found:", dataset_type_dir))
     next
   }
   
-  sublineages <- list.dirs(dataset_type_dir, full.names = FALSE, recursive = FALSE)
-  if (length(sublineages) == 0) {
-    warning(paste("No sublineages found in:", dataset_type_dir))
+  # Get all cell types for this dataset type
+  cell_types <- list.dirs(dataset_type_dir, full.names = FALSE, recursive = FALSE)
+  if (length(cell_types) == 0) {
+    warning(paste("No cell types found in:", dataset_type_dir))
     next
   }
 
-  # Process each sublineage
-  for (current_sublineage in sublineages) {
-    message(paste("Processing sublineage:", current_sublineage))
+  # Process each cell type
+  for (current_cell_type in cell_types) {
+    message(paste("  Processing cell type:", current_cell_type))
     
-    sublineage_dir <- file.path(dataset_type_dir, current_sublineage)
-    meta_scores_file_path <- file.path(sublineage_dir, "meta_scores.csv")
+    cell_type_dir <- file.path(dataset_type_dir, current_cell_type)
     
-    if (!file.exists(meta_scores_file_path)) {
-      warning(paste("Meta scores file not found for sublineage:", current_sublineage))
+    # Get all gene types for this cell type
+    gene_types <- list.dirs(cell_type_dir, full.names = FALSE, recursive = FALSE)
+    if (length(gene_types) == 0) {
+      warning(paste("No gene types found in:", cell_type_dir))
       next
     }
     
-    # Read meta scores
-    meta_scores_dt <- fread(meta_scores_file_path)
-    
-    # Map genes to Entrez IDs
-    genes_for_sublineage <- unique(meta_scores_dt$gene)
-    entrez_df <- map_symbols_to_entrez(genes_for_sublineage)
-    entrez_vector <- unique(na.omit(entrez_df$ENTREZID))
-    symbol_entrez_map <- setNames(entrez_df$SYMBOL, entrez_df$ENTREZID)
-    
-    # Perform KEGG mapping
-    kegg_map_obj <- perform_kegg_mapping(entrez_vector)
-    
-    if (!is.null(kegg_map_obj) && nrow(as.data.frame(kegg_map_obj)) > 0) {
-      processed_results <- process_kegg_results(
-        as.data.frame(kegg_map_obj),
-        symbol_entrez_map,
-        meta_scores_dt
-      )
+    # Process each gene type
+    for (current_gene_type in gene_types) {
+      message(paste("    Processing gene type:", current_gene_type))
       
-      # Filter for metabolic pathways
-      processed_results <- filter_metabolic_pathways(processed_results, metabolic_pathways)
+      gene_type_dir <- file.path(cell_type_dir, current_gene_type)
+      meta_scores_file_path <- file.path(gene_type_dir, "meta_scores.csv")
       
-      # Save results
-      sanitized_sublineage_name <- gsub("[^a-zA-Z0-9_.-]", "_", current_sublineage)
-      sublineage_output_dir <- file.path(type_specific_output_dir, sanitized_sublineage_name)
-      dir_create(sublineage_output_dir, recurse = TRUE)
+      if (!file.exists(meta_scores_file_path)) {
+        warning(paste("Meta scores file not found:", meta_scores_file_path))
+        next
+      }
       
-      output_file <- file.path(
-        sublineage_output_dir,
-        paste0(sanitized_sublineage_name, "_kegg_pathway_map.csv")
-      )
-      write.csv(processed_results, output_file, row.names = FALSE)
+      # Read meta scores
+      meta_scores_dt <- fread(meta_scores_file_path)
+      
+      if (nrow(meta_scores_dt) == 0) {
+        warning(paste("Empty meta scores file:", meta_scores_file_path))
+        next
+      }
+      
+      # Map genes to Entrez IDs
+      genes_for_combination <- unique(meta_scores_dt$gene)
+      entrez_df <- map_symbols_to_entrez(genes_for_combination)
+      entrez_vector <- unique(na.omit(entrez_df$ENTREZID))
+      symbol_entrez_map <- setNames(entrez_df$SYMBOL, entrez_df$ENTREZID)
+      
+      if (length(entrez_vector) == 0) {
+        warning(paste("No valid Entrez IDs found for combination:", current_dataset_type, current_cell_type, current_gene_type))
+        next
+      }
+      
+      # Perform KEGG mapping
+      kegg_map_obj <- perform_kegg_mapping(entrez_vector)
+      
+      if (!is.null(kegg_map_obj) && nrow(as.data.frame(kegg_map_obj)) > 0) {
+        processed_results <- process_kegg_results(
+          as.data.frame(kegg_map_obj),
+          symbol_entrez_map,
+          meta_scores_dt
+        )
+        
+        # Filter for metabolic pathways
+        processed_results <- filter_metabolic_pathways(processed_results, metabolic_pathways)
+        
+        # Create output directory structure: dataset_type/cell_type/gene_type/
+        combination_output_dir <- file.path(
+          PATHWAY_MAPPING_OUTPUT_PARENT_DIR, 
+          current_dataset_type, 
+          current_cell_type, 
+          current_gene_type
+        )
+        dir_create(combination_output_dir, recurse = TRUE)
+        
+        # Save results
+        output_file <- file.path(
+          combination_output_dir,
+          paste0("kegg_pathway_enrichment_", current_dataset_type, "_", current_cell_type, "_", current_gene_type, ".csv")
+        )
+        write.csv(processed_results, output_file, row.names = FALSE)
+        
+        message(paste("      Saved results to:", output_file))
+      } else {
+        message(paste("      No KEGG enrichment results for combination:", current_dataset_type, current_cell_type, current_gene_type))
+      }
     }
   }
 }
 
-message("Results are saved in: ", PATHWAY_MAPPING_OUTPUT_PARENT_DIR)
+message("Pathway enrichment analysis complete. Results saved in:", PATHWAY_MAPPING_OUTPUT_PARENT_DIR)

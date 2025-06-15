@@ -1,26 +1,27 @@
 library(yaml)
 
 
-# Base path for preprocessed training datasets
+# Base path of the training datasets
 BASE_DATA_PATH <- file.path("output", "1. data preprocessing", "training datasets")
 
 # Load helper functions for managing file paths 
-source(file.path("src", "0. utils", "path_manager.R")) 
+source(file.path("src", "0. utils", "path_manager.R"))
 
 # Defines the path to the configuration file
 config_path <- file.path("src", "2. models", "config.yaml") 
-if (!file.exists(config_path)) {
-  stop(paste("Configuration file not found:", config_path))
-}
-# Read config into a list
-config <- yaml::read_yaml(config_path) 
 
-# Helper function to extract names of true flags from a list
+# Read config into a list
+config <- yaml::read_yaml(config_path)
+
+
+# === HELPER FUNCTIONS ===
+
+# Extract names of true flags from config list
 extract_active_items <- function(config_list, item_name) {
   if (is.null(config_list) || !is.list(config_list)) {
     stop(paste(item_name, "is missing or not a list in config.yaml under training_parameters."))
   }
-  # Filters for items marked as TRUE in the config
+  # Filters for items marked as true in the config
   active_items <- names(config_list)[unlist(config_list)] 
   if (length(active_items) == 0) {
     warning(paste("No active", item_name, "found (all flags are false or list is empty)."))
@@ -28,7 +29,8 @@ extract_active_items <- function(config_list, item_name) {
   return(active_items)
 }
 
-# Helper function to load datasets from dataset directory
+
+# Load datasets from dataset directory
 load_dataset_csvs <- function(x_train_path, x_test_path, y_train_path, y_test_path) {
   X_train_df <- read.csv(x_train_path, check.names = FALSE) 
   X_test_df <- read.csv(x_test_path, check.names = FALSE) 
@@ -37,6 +39,7 @@ load_dataset_csvs <- function(x_train_path, x_test_path, y_train_path, y_test_pa
   
   return(list(X_train_df = X_train_df, X_test_df = X_test_df, y_train_df = y_train_df, y_test_df = y_test_df))
 }
+
 
 # Saves various model outputs to specified files
 results_to_output <- function(model_results, output_paths_list) { 
@@ -80,14 +83,14 @@ results_to_output <- function(model_results, output_paths_list) {
         })
     }
   } else {
-    warning("Predictions output or predictions output path is empty")
+    warning("Predictions output or predictions output path is empty.")
   }
 
   # Save feature importance expects a data frame with feature and value columns
   if (!is.null(model_results$raw_feature_importance) && !is.null(output_paths_list$feature_importance)) {
     message(paste("Saving feature importance to", output_paths_list$feature_importance))
     # Ensure directory exists
-    dir.create(dirname(output_paths_list$feature_importance), recursive = TRUE, showWarnings = FALSE) 
+    dir.create(dirname(output_paths_list$feature_importance), recursive = TRUE, showWarnings = FALSE)
     
     feature_importance_df <- as.data.frame(model_results$raw_feature_importance)
     if (!all(c("Feature", "Value") %in% colnames(feature_importance_df))) {
@@ -96,7 +99,7 @@ results_to_output <- function(model_results, output_paths_list) {
     
     tryCatch({
       # Save feature importance to CSV
-      write.csv(feature_importance_df, output_paths_list$feature_importance, row.names = FALSE) 
+      write.csv(feature_importance_df, output_paths_list$feature_importance, row.names = FALSE)
     }, error = function(e) {
       warning(paste("Error saving feature importance:", e$message))
     })
@@ -105,13 +108,16 @@ results_to_output <- function(model_results, output_paths_list) {
   }
 }
 
+
+# === CORE FUNCTIONS ===
+
 # Function to source all model training scripts from a specified directory
 source_all_model_scripts <- function(modeling_dir_path) {
   message(paste("Sourcing all training scripts from:", modeling_dir_path))
 
   if (dir.exists(modeling_dir_path)) {
-    # List all files ending with .R or .r in the modeling directory
-    r_scripts <- list.files(path = modeling_dir_path, pattern = "\\.[Rr]$", full.names = TRUE, recursive = FALSE) # Ensure recursive is FALSE
+    # List all R files ending with in the modeling directory
+    r_scripts <- list.files(path = modeling_dir_path, pattern = "\\.[Rr]$", full.names = TRUE, recursive = FALSE)
     
     if (length(r_scripts) > 0) {
       message(paste("Found", length(r_scripts), "training scripts in", modeling_dir_path, ":"))
@@ -215,14 +221,7 @@ run_training_pipeline <- function(config_obj) {
     }
     
     # Load datasets
-    datasets <- tryCatch({
-      load_dataset_csvs(X_train_file, X_test_file, y_train_file, y_test_file)
-    }, error = function(e) {
-      warning(paste("Error loading data for", current_iter_id, ":", e$message))
-      return(NULL) 
-    })
-    # Skip this iteration if data loading failed
-    if (is.null(datasets)) next 
+    datasets <- load_dataset_csvs(X_train_file, X_test_file, y_train_file, y_test_file)
 
     # Loop through each model specified in the configuration
     for (model_entry in models_to_run_list) {
@@ -298,13 +297,15 @@ run_training_pipeline <- function(config_obj) {
         
         message(paste0("Finished model: ", model_name))
       } else {
-        # Skipping model training if the train flag is not set to true
+        # Skip training if the train flag is not true
       }
     }
     message(paste0("Finished combination."))
   }
 }
 
+
+# === EXECUTE PIPELINE ===
 
 # Run the training pipeline
 run_training_pipeline(

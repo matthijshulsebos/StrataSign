@@ -1,0 +1,115 @@
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(Matrix)
+
+# Load required datasets
+source("src/1. data preprocessing/training datasets/data_loader.R")
+
+# Configuration
+DOUBLETS <- c(3, 4, 6, 12, 15, 21, 22, 24, 26, 27, 60)
+output_figure_dir <- "output/6. plots/cell type abundance"
+output_plot_name <- "cell_type_density_boxplot.png"
+
+# Load datasets
+message("Loading datasets...")
+datasets <- load_all_datasets()
+lung_ldm <- datasets$lung_ldm
+table_s1 <- datasets$table_s1
+annots_list <- datasets$annots_list
+
+# Create output directory
+dir.create(output_figure_dir, recursive = TRUE, showWarnings = FALSE)
+output_plot_path <- file.path(output_figure_dir, output_plot_name)
+
+# Prepare data for analysis
+message("Preparing data...")
+
+# Extract downsampled UMI matrix and prepare cell metadata
+ds_matrix <- extract_downsampled_umitab(lung_ldm)
+cell_metadata <- prepare_cell_metadata(lung_ldm, table_s1, DOUBLETS)
+umitab_filtered <- filter_umitab(ds_matrix, cell_metadata)
+cell_metadata_final <- cell_metadata %>% filter(cell_ID %in% colnames(umitab_filtered))
+
+# Convert UMI matrix to long format and aggregate by cell type
+message("Converting UMI matrix to long format...")
+
+# Ensure input is sparse
+if (!inherits(umitab_filtered, "Matrix")) {
+  umitab_filtered <- as(umitab_filtered, "sparseMatrix")
+}
+
+# Convert sparse matrix to triplet format
+umitab_triplet <- summary(umitab_filtered)
+colnames(umitab_triplet) <- c("gene_idx", "cell_idx", "umi_count")
+
+# Map indices to names
+umitab_triplet$gene <- rownames(umitab_filtered)[umitab_triplet$gene_idx]
+umitab_triplet$cell_ID <- colnames(umitab_filtered)[umitab_triplet$cell_idx]
+
+# Join with metadata and aggregate by sample and cluster
+counts_long <- umitab_triplet %>%
+  select(gene, cell_ID, umi_count) %>%
+  inner_join(cell_metadata_final %>% select(cell_ID, sample_ID, cluster_ID), by = "cell_ID") %>%
+  group_by(sample_ID, cluster_ID) %>%
+  summarise(total_counts = sum(umi_count), .groups = 'drop') %>%
+  mutate(
+    sample_ID = as.character(sample_ID),
+    cluster_ID = as.numeric(cluster_ID)
+  )
+
+# Calculate density per sample per cell type
+patient_celltype_density <- counts_long %>%
+  # Add patient information
+  left_join(table_s1 %>% select(sample_ID, patient_ID, tissue), by = "sample_ID") %>%
+  filter(!is.na(patient_ID)) %>%
+  # Add cell type annotations
+  left_join(annots_list, by = c("cluster_ID" = "cluster")) %>%
+  mutate(
+    cluster_name = ifelse(!is.na(sub_lineage), sub_lineage, lineage),
+    cluster_name = gsub("/", "-", cluster_name),
+    cluster_label = paste0(cluster_name, " (", cluster_ID, ")")
+  ) %>%
+  # Filter out zero counts for density visualization
+  filter(total_counts > 0)
+
+# Create the density boxplot
+message("Creating density boxplot...")
+p <- ggplot(patient_celltype_density, aes(x = reorder(cluster_label, cluster_ID), y = total_counts)) +
+  geom_boxplot(aes(fill = tissue), alpha = 0.7) +
+  scale_y_log10(labels = scales::comma_format()) +
+  labs(
+    x = "Cell Type",
+    y = "Density (Total Counts, log10 scale)",
+    fill = "Tissue Type"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    legend.position = "top",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank()
+  ) +
+  scale_fill_manual(values = c("Normal" = "#4CAF50", "Tumor" = "#F44336"))
+
+# Save the plot
+message(paste("Saving density plot to:", output_plot_path))
+ggsave(output_plot_path, p, width = 16, height = 8, dpi = 300)
+
+# Print summary statistics
+message("Density summary statistics:")
+summary_stats <- patient_celltype_density %>%
+  group_by(cluster_ID, cluster_label, tissue) %>%
+  summarise(
+    n_samples = n(),
+    median_density = median(total_counts),
+    mean_density = mean(total_counts),
+    min_density = min(total_counts),
+    max_density = max(total_counts),
+    .groups = 'drop'
+  ) %>%
+  arrange(cluster_ID)
+
+print(summary_stats)
+
+message("Cell type density analysis complete!")

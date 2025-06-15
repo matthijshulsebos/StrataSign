@@ -12,10 +12,16 @@ source("src/0. utils/feature_name_utils.R")
 # Create empty final table
 create_empty_final_table <- function(model_names) {
   score_cols <- paste0(model_names, "_score")
-  cols <- c("feature_id","gene","sublineage","meta_score","n_models_occur", score_cols)
+  cols <- c("feature_id","gene","sublineage","meta_score","n_models_occur","fold_change", score_cols)
   
-  df <- tibble::tibble()
-  for (col in cols) df[[col]] <- numeric(0)
+  df <- tibble()
+  for (col in cols) {
+    if (col %in% c("fold_change")) {
+      df[[col]] <- numeric(0)
+    } else {
+      df[[col]] <- numeric(0)
+    }
+  }
 
   return(df[cols])
 }
@@ -56,49 +62,68 @@ load_and_extract_features <- function(file_path, model_name) {
 # Find and filter files
 get_filtered_feature_files <- function(models_dir, target_gene_type, target_cell_type) {
   
-  # models_dir is e.g., "output/2. models/absolute"
+  # Look for cell type directories (e.g., all_clusters, macrophages)
+  cell_type_dirs <- dir_ls(models_dir, type = "directory")
   
-  # Get model subdirectories (e.g., elasticnet, lasso)
-  model_subdirs <- fs::dir_ls(models_dir, type = "directory")
-  
-  if (length(model_subdirs) == 0) {
+  if (length(cell_type_dirs) == 0) {
     return(list())
   }
 
   all_found_files_list <- list() # Initialize an empty list to collect file info
 
-  for (model_subdir_path in model_subdirs) {
-    model_name_from_path <- fs::path_file(model_subdir_path) # Get 'elasticnet' from '.../absolute/elasticnet'
+  for (cell_type_dir_path in cell_type_dirs) {
+    cell_type_name <- path_file(cell_type_dir_path) # Get 'all_clusters' from '.../cp10k/all_clusters'
     
-    # Construct the full path to where the CSV files should be
-    # e.g., output/2. models/absolute/elasticnet/metabolic/all_clusters
-    specific_target_dir <- fs::path(model_subdir_path, target_gene_type, target_cell_type)
+    # Skip if this is not the target cell type
+    if (cell_type_name != target_cell_type) {
+      next
+    }
     
-    if (fs::dir_exists(specific_target_dir)) {
-      # Define the glob pattern and its regex equivalent
-      file_name_glob_pattern <- "feature_importance*.csv"
-      regex_pattern_for_list_files <- utils::glob2rx(file_name_glob_pattern)
+    # Look for gene type directories (e.g., metabolic, nonmetabolic, random)
+    gene_type_dirs <- dir_ls(cell_type_dir_path, type = "directory")
+    
+    for (gene_type_dir_path in gene_type_dirs) {
+      gene_type_name <- path_file(gene_type_dir_path) # Get 'metabolic' from '.../all_clusters/metabolic'
       
-      # Use base R's list.files()
-      files_in_specific_dir <- list.files(path = specific_target_dir, 
-                                          pattern = regex_pattern_for_list_files, 
-                                          full.names = TRUE, 
-                                          recursive = FALSE,
-                                          ignore.case = TRUE)
+      # Skip if this is not the target gene type
+      if (gene_type_name != target_gene_type) {
+        next
+      }
       
-      if (length(files_in_specific_dir) > 0) {
-        for (f_path in files_in_specific_dir) {
-          all_found_files_list[[length(all_found_files_list) + 1]] <- list(
-            file_path = as.character(f_path), 
-            model_name = model_name_from_path
-          )
+      # Look for model directories
+      model_dirs <- dir_ls(gene_type_dir_path, type = "directory")
+      
+      for (model_dir_path in model_dirs) {
+        model_name_from_path <- path_file(model_dir_path)
+        
+        if (dir_exists(model_dir_path)) {
+          # Define the glob pattern and its regex equivalent
+          file_name_glob_pattern <- "feature_importance*.csv"
+          regex_pattern_for_list_files <- utils::glob2rx(file_name_glob_pattern)
+          
+          # Use base R's list.files()
+          files_in_model_dir <- list.files(path = model_dir_path, 
+                                            pattern = regex_pattern_for_list_files, 
+                                            full.names = TRUE, 
+                                            recursive = FALSE,
+                                            ignore.case = TRUE)
+          
+          if (length(files_in_model_dir) > 0) {
+            for (f_path in files_in_model_dir) {
+              all_found_files_list[[length(all_found_files_list) + 1]] <- list(
+                file_path = as.character(f_path), 
+                model_name = model_name_from_path
+              )
+            }
+          }
         }
       }
     }
-  } # End loop over model_subdirs
+  }
   
   return(all_found_files_list) 
 }
+
 
 # Extract all into one data frame
 extract_all_features <- function(file_model_list) {
@@ -108,6 +133,7 @@ extract_all_features <- function(file_model_list) {
     bind_rows()
 }
 
+
 # Compute model density (if >100 non zero features)
 compute_model_density <- function(all_features, model_names, eps=1e-10) {
   map_lgl(model_names, function(m) {
@@ -115,6 +141,7 @@ compute_model_density <- function(all_features, model_names, eps=1e-10) {
     sum(df$abs_value>eps, na.rm=TRUE) > 100
   }) %>% set_names(model_names)
 }
+
 
 # Scale single model score table
 scale_scores_for_model <- function(df, is_dense, threshold=0.7, eps=1e-10) {
@@ -140,6 +167,7 @@ scale_scores_for_model <- function(df, is_dense, threshold=0.7, eps=1e-10) {
   df0 %>% select(feature_id, gene, sublineage, !!base_name)
 }
 
+
 # Build model score table
 build_model_score_tables <- function(all_feat, density_map) {
   models <- names(density_map)
@@ -149,10 +177,23 @@ build_model_score_tables <- function(all_feat, density_map) {
   })
 }
 
-# Merge and compute meta score
-merge_and_score <- function(score_tables) {
+
+# Merge and compute meta score with fold change integration
+merge_and_score <- function(score_tables, fold_changes_data = NULL) {
   merged <- reduce(score_tables, full_join, by=c("feature_id","gene","sublineage"))
   score_cols <- grep("_score$", names(merged), value=TRUE)
+  
+  # Add fold change information
+  if (!is.null(fold_changes_data)) {
+    merged <- merged %>%
+      left_join(fold_changes_data %>% select(Feature, Value), 
+                by = c("feature_id" = "Feature")) %>%
+      rename(fold_change = Value)
+  } else {
+    merged <- merged %>%
+      mutate(fold_change = NA_real_)
+  }
+  
   merged %>%
     mutate(across(all_of(score_cols), ~coalesce(.x,0))) %>%
     mutate(
@@ -160,6 +201,7 @@ merge_and_score <- function(score_tables) {
       n_models_occur= rowSums(select(., all_of(score_cols))>0)
     )
 }
+
 
 # Filter meta scores and write to file
 filter_and_write <- function(df, min_models, all_models, out_dir) {
@@ -171,21 +213,21 @@ filter_and_write <- function(df, min_models, all_models, out_dir) {
     return(empty)
   }
   score_cols <- grep("_score$", names(df_f), value=TRUE) 
-  cols <- c("feature_id","gene","sublineage","meta_score","n_models_occur", sort(score_cols))
+  cols <- c("feature_id","gene","sublineage","meta_score","n_models_occur","fold_change", sort(score_cols))
   write_csv(select(df_f, all_of(cols)), file.path(out_dir,"meta_scores.csv"))
   df_f[cols]
 }
 
+
 # Main intersector function
-find_feature_intersection <- function(models_dir, output_dir, min_models_occurrence, cell_type_filter_val) {
+find_feature_intersection <- function(models_dir, output_dir, min_models_occurrence, cell_type_filter_val, gene_type_filter_val, fold_changes_data = NULL) {
   dir_create(output_dir, recurse=TRUE)
-  gene_type <- "metabolic" # This is the target gene_type for this function's scope
 
   # Pass target_gene_type and target_cell_type to the updated function
-  fm_list <- get_filtered_feature_files(models_dir, gene_type, cell_type_filter_val)
+  fm_list <- get_filtered_feature_files(models_dir, gene_type_filter_val, cell_type_filter_val)
   
   if (length(fm_list)==0) {
-    message("No files for gene=",gene_type," cell=",cell_type_filter_val)
+    message("No files for gene=",gene_type_filter_val," cell=",cell_type_filter_val)
     return(NULL)
   }
   all_feat <- extract_all_features(fm_list)
@@ -200,37 +242,41 @@ find_feature_intersection <- function(models_dir, output_dir, min_models_occurre
 
   density_map <- compute_model_density(all_feat, models)
   score_tables<- build_model_score_tables(all_feat, density_map)
-  merged <- merge_and_score(score_tables)
+  merged <- merge_and_score(score_tables, fold_changes_data)
   result <- filter_and_write(merged, min_models_occurrence, models, output_dir)
 
   return(result)
 }
 
-# Process a single dataset type and cell type
-process_dataset_and_cell_type <- function(type, cell_type, base_models_dir, base_output_dir, min_models_param) {
+
+# Process a single dataset type, cell type, and gene type combination
+process_dataset_cell_gene_combination <- function(type, cell_type, gene_type, base_models_dir, base_output_dir, min_models_param, fold_changes_data = NULL) {
   models_dir <- file.path(base_models_dir, type)
-  output_dir <- file.path(base_output_dir, type, cell_type)
+  output_dir <- file.path(base_output_dir, type, cell_type, gene_type)
   
   if (!dir.exists(models_dir)) {
     warning(glue("Models directory not found: {models_dir}."))
     return(NULL)
   }
   
-  message(glue("Processing dataset type: {type}, cell type: {cell_type}"))
+  message(glue("Processing dataset type: {type}, cell type: {cell_type}, gene type: {gene_type}"))
   result <- find_feature_intersection(
     models_dir = models_dir,
     output_dir = output_dir,
     min_models_occurrence = min_models_param,
-    cell_type_filter_val = cell_type
+    cell_type_filter_val = cell_type,
+    gene_type_filter_val = gene_type,
+    fold_changes_data = fold_changes_data
   )
   
   if (is.null(result) || nrow(result) == 0) {
-    message(glue("No results for dataset type: {type}, cell type: {cell_type}"))
+    message(glue("No results for dataset type: {type}, cell type: {cell_type}, gene type: {gene_type}"))
     return(NULL)
   }
   
   return(file.path(output_dir, "meta_scores.csv"))
 }
+
 
 # Generate sublineage color map
 generate_sublineage_color_map <- function(meta_score_files, output_path) {
@@ -251,32 +297,42 @@ generate_sublineage_color_map <- function(meta_score_files, output_path) {
   }
 }
 
-# Main function to run intersector for multiple cell types
+
+# Main function to run intersector for all combinations
 run_intersector <- function(
   base_models_dir = "output/2. models",
   base_output_dir = "output/3. intersector",
   min_models_param = 2,
-  dataset_types_to_process = c("absolute", "relative"),
-  cell_types_to_process = c("all_clusters", "macrophages"),
-  sublineage_color_map_path = "output/3. intersector/uniform_sublineage_colors.rds"
+  dataset_types_to_process = c("ctnorm_global", "ctnorm_relative", "read_depth"),
+  cell_types_to_process = c("all_clusters", "macrophages", "lcam_hi", "lcam_lo", "lcam_both"),
+  gene_types_to_process = c("metabolic", "nonmetabolic", "random"),
+  sublineage_color_map_path = "output/3. intersector/sublineage_colors.rds",
+  fold_changes_file = "output/4. fold changes/feature_fold_changes.csv"
 ) {
+  
+  # Load fold changes data
+  fold_changes_data <- read_csv(fold_changes_file, show_col_types = FALSE)
+  
   meta_score_files <- expand.grid(
     type = dataset_types_to_process,
     cell_type = cell_types_to_process,
+    gene_type = gene_types_to_process,
     stringsAsFactors = FALSE
   ) %>%
-    purrr::pmap(~ process_dataset_and_cell_type(..1, ..2, base_models_dir, base_output_dir, min_models_param)) %>%
-    purrr::compact() # Replaces discard(is.null) and works with list from pmap
+    pmap(~ process_dataset_cell_gene_combination(..1, ..2, ..3, base_models_dir, base_output_dir, min_models_param, fold_changes_data)) %>%
+    compact()
   
   generate_sublineage_color_map(meta_score_files, sublineage_color_map_path)
   message("Finished intersector analysis.")
 }
+
 
 # Run the intersector
 run_intersector(
   base_models_dir = "output/2. models",
   base_output_dir = "output/3. intersector",
   min_models_param = 2,
-  cell_types_to_process = c("all_clusters", "macrophages"),
+  cell_types_to_process = c("all_clusters", "macrophages", "lcam_hi", "lcam_lo", "lcam_both"),
+  gene_types_to_process = c("metabolic", "nonmetabolic", "random"),
   sublineage_color_map_path = "output/3. intersector/sublineage_colors.rds"
 )

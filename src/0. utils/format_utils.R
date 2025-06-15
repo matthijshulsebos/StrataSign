@@ -1,6 +1,5 @@
-
-library(clusterProfiler) # nolint
-library(org.Hs.eg.db) # nolint
+library(clusterProfiler)
+library(org.Hs.eg.db)
 
 # Function that simulates scRNAseq as bulk
 sc_to_bulk <- function(sc_data) {
@@ -28,7 +27,7 @@ map_entrez_to_symbols <- function(entrez_ids) {
                        toType = "SYMBOL",
                        OrgDb = org.Hs.eg.db)
   column_names <- c("Entrez_ID", "Gene_Symbol")
-  colnames(mapped_metabolic_genes) <- column_names
-  # Return the resulting data frame
+  colnames(gene_symbols) <- column_names
+  
   return(gene_symbols)
 }
