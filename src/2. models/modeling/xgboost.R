@@ -19,41 +19,33 @@ preprocess_data_xgb <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   # Define expected levels consistently
   expected_levels <- c("Normal", "Tumor")
   
-  # Convert target variables to factors
-  y_train_factor_caret <- factor(y_train_df[[y_train_col_name]], levels = expected_levels)
-  y_test_factor_eval <- factor(y_test_df[[y_test_col_name]], levels = expected_levels)
-  
+  # Convert target variables to factors with explicit levels
+  y_train_factor <- factor(y_train_df[[y_train_col_name]], levels = expected_levels)
+  y_test_factor <- factor(y_test_df[[y_test_col_name]], levels = expected_levels)
+
   # Set the positive class label
   positive_class_label <- "Tumor"
   
   # Convert target to numeric where tumor is 1 and normal is 0
-  y_train_numeric_xgb <- as.numeric(y_train_factor_caret == positive_class_label)
-  y_test_numeric_output <- as.numeric(y_test_factor_eval == positive_class_label)
+  y_train_numeric <- as.numeric(y_train_factor == positive_class_label)
+  y_test_numeric <- as.numeric(y_test_factor == positive_class_label)
 
-  # Near zero variance filter
-  nzv_features <- nearZeroVar(X_train_df, saveMetrics = FALSE, names = TRUE)
-  cols_to_keep_names <- setdiff(colnames(X_train_df), nzv_features)
-  
-  # Apply NZV filter to both sets
-  X_train_filtered <- X_train_df[, cols_to_keep_names, drop = FALSE]
-  X_test_filtered <- X_test_df[, cols_to_keep_names, drop = FALSE]
+  # No near zero variance filtering for XGBoost
+  X_train_matrix <- as.matrix(X_train_df)
+  X_test_matrix <- as.matrix(X_test_df)
 
-  # Convert to matrix for XGBoost
-  X_train_matrix <- as.matrix(X_train_filtered)
-  X_test_matrix <- as.matrix(X_test_filtered)
-  
   # Create DMatrices for xgb.train
-  dtrain <- xgb.DMatrix(data = X_train_matrix, label = y_train_numeric_xgb)
-  dtest <- xgb.DMatrix(data = X_test_matrix, label = y_test_numeric_output)
+  dtrain <- xgb.DMatrix(data = X_train_matrix, label = y_train_numeric)
+  dtest <- xgb.DMatrix(data = X_test_matrix, label = y_test_numeric)
 
   return(list(
     X_train_matrix_for_caret = X_train_matrix,
-    y_train_factor_for_caret = y_train_factor_caret,
+    y_train_factor_for_caret = y_train_factor,
     dtrain_for_xgb = dtrain,
     dtest_for_xgb = dtest,
-    y_test_numeric_for_output = y_test_numeric_output,
+    y_test_numeric_for_output = y_test_numeric,
     all_original_features = all_original_features_train,
-    kept_feature_names = cols_to_keep_names,
+    kept_feature_names = all_original_features_train,
     positive_class_label = positive_class_label
   ))
 }
@@ -90,7 +82,7 @@ train_xgboost_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
     subsample = c(0.8)
   )
 
-  # Configure cross-validation
+  # Configure cv
   control <- trainControl(
     method = "cv",
     number = 3,
@@ -144,9 +136,10 @@ train_xgboost_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
     y_pred_prob = as.numeric(y_pred_prob_vector)
   )
   
-  # Calculate feature importance using Gain
+  # Calculate feature importance using gain
   importance_matrix <- xgb.importance(feature_names = kept_feature_names, model = final_xgb_model)
   
+  # Create feature importance dataframe
   feature_importance_df <- data.frame(
       Feature = importance_matrix$Feature,
       Value = importance_matrix$Gain

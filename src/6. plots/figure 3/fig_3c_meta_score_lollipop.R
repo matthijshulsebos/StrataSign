@@ -146,7 +146,7 @@ create_batched_lollipop_plots <- function(all_results_data, sublineage_colors, f
 # Main unified function to run all intersector lollipop plots
 run_all_intersector_lollipop_plots <- function(
     intersector_parent_input_dir = "output/3. intersector",
-    figures_parent_output_dir = "output/6. plots/intersector", 
+    figures_parent_output_dir = "output/6. plots/figure 3", 
     lollipop_batch_size = 50,
     lollipop_max_total_features = 200,
     dataset_types_to_process = c("ctnorm_global", "ctnorm_relative", "read_depth"), 

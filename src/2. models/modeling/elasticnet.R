@@ -26,26 +26,16 @@ preprocess_data_en <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   # Store original feature names
   original_features <- colnames(X_train_df)
 
-  # Near zero variance filtering
-  nzv_results <- nearZeroVar(X_train_df, saveMetrics = FALSE, names = TRUE) 
-  
-  # Filter out nzv features and keep these cols
-  features_to_keep <- setdiff(original_features, nzv_results)
-  
-  # Apply nzv filter to both sets
-  X_train_filtered <- X_train_df[, features_to_keep, drop = FALSE]
-  X_test_filtered <- X_test_df[, features_to_keep, drop = FALSE]
-
-  # Convert feature data to matrix format for glmnet
-  X_train_matrix <- as.matrix(X_train_filtered)
-  X_test_matrix <- as.matrix(X_test_filtered)
+  # Convert to matrix for glmnet
+  X_train_matrix <- as.matrix(X_train_df)
+  X_test_matrix <- as.matrix(X_test_df)
 
   return(list(
     X_train_matrix = X_train_matrix,
     X_test_matrix = X_test_matrix,
     y_train_numeric = y_train_numeric,
     y_test_numeric = y_test_numeric,
-    kept_features = features_to_keep,
+    kept_feature_names = original_features,
     positive_class_label = positive_class_label
   ))
 }
@@ -70,11 +60,11 @@ train_elasticnet_model <- function(X_train_df, X_test_df, y_train_df, y_test_df)
   best_alpha <- NA
   best_lambda <- NA
   
-  # Assign each sample to one of 5 folds
+  # Assign each sample to one of 3 folds manually
   set.seed(42)
   fold_ids <- sample(1:3, size = length(y_train_numeric), replace = TRUE)
 
-  # Tune parameters
+  # Tune alpha parameter
   for (alpha_val in alpha_values) {
     cv_fit <- cv.glmnet(
       x = X_train_matrix, 
@@ -120,7 +110,7 @@ train_elasticnet_model <- function(X_train_df, X_test_df, y_train_df, y_test_df)
 
   # Create dataframe for predictions output
   predictions_output_df <- data.frame(
-    y_test = processed_data$y_test_numeric,  # Fix the variable reference
+    y_test = processed_data$y_test_numeric,
     y_pred = y_pred_class,
     y_pred_prob = raw_preds_vector
   )
@@ -136,7 +126,7 @@ train_elasticnet_model <- function(X_train_df, X_test_df, y_train_df, y_test_df)
     filter(Feature != "(Intercept)")
 
   # Add any features not used in modeling with zero importance
-  original_features <- colnames(X_train_df)
+  processed_data$kept_feature_names <- colnames(X_train_df)
   features_not_in_model <- setdiff(original_features, feature_importance_df$Feature)
   if (length(features_not_in_model) > 0) {
     zero_importance_df <- data.frame(

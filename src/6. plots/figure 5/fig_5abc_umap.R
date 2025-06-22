@@ -564,7 +564,7 @@ create_normal_vs_tumor_plots <- function(plot_data, output_dir) {
 }
 
 # Main function
-generate_umap_plots <- function(output_dir = "output/6. plots/UMAP", max_cells = 50000) {
+generate_umap_plots <- function(output_dir = "output/6. plots/figure 5", max_cells = 50000) {
   dir_create(output_dir, recurse = TRUE)
   
   # Load data
@@ -595,5 +595,5 @@ generate_umap_plots <- function(output_dir = "output/6. plots/UMAP", max_cells =
 # Run the analysis
 if (interactive() || !exists(".umap_sourced")) {
   .umap_sourced <- TRUE
-  umap_results <- generate_umap_plots(max_cells = 50000)
+  umap_results <- generate_umap_plots(output_dir = "output/6. plots/figure 5", max_cells = 50000)
 }

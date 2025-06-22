@@ -140,7 +140,8 @@ p <- ggplot(combined_data, aes(x = log2_fold_change, y = meta_score)) +
   )
 
 # Save the plot
-output_path <- "output/6. plots/volcano/volcano_importance_vs_foldchange.png"
+output_path <- "output/6. plots/figure 4/volcano_importance_vs_foldchange.png"
+dir.create("output/6. plots/figure 4", recursive = TRUE, showWarnings = FALSE)
 ggsave(output_path, p, width = 12, height = 8, dpi = 300, bg = "white")
 
 # Create summary statistics
@@ -169,9 +170,9 @@ top_features_high_importance_low_fc <- combined_data %>%
   select(feature_id, gene, sublineage, meta_score, log2_fold_change, gene_type)
 
 # Save summary tables
-write_csv(summary_stats, "output/6. plots/volcano/volcano_summary_statistics.csv")
-write_csv(top_features_high_importance_high_fc, "output/6. plots/volcano/top_high_importance_high_fc.csv")
-write_csv(top_features_high_importance_low_fc, "output/6. plots/volcano/top_high_importance_low_fc.csv")
+write_csv(summary_stats, "output/6. plots/figure 4/volcano_summary_statistics.csv")
+write_csv(top_features_high_importance_high_fc, "output/6. plots/figure 4/top_high_importance_high_fc.csv")
+write_csv(top_features_high_importance_low_fc, "output/6. plots/figure 4/top_high_importance_low_fc.csv")
 
 # Print key findings
 high_imp_high_fc_count <- sum(combined_data$significance == "High importance & High FC")

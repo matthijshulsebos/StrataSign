@@ -22,7 +22,6 @@ calculate_f_value_svmrbf <- function(feature_values, class_labels) {
 
 # Function to preprocess data for SVM RBF
 preprocess_data_svmrbf <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
-  
   # Set training data as dataframes
   X_train_df <- as.data.frame(X_train_df)
   X_test_df <- as.data.frame(X_test_df)
@@ -47,42 +46,35 @@ preprocess_data_svmrbf <- function(X_train_df, X_test_df, y_train_df, y_test_df)
   # Convert target to numeric where tumor is 1 and normal is 0
   y_test_numeric_output <- as.numeric(y_test_factor == positive_class_label_factor)
 
-  # Near zero variance filter
-  nzv_features <- nearZeroVar(X_train_df, saveMetrics = FALSE, names = TRUE)
-  cols_to_keep_after_nzv <- setdiff(colnames(X_train_df), nzv_features)
-  
-  # Apply NZV filter to both sets
-  X_train_nzv_filtered <- X_train_df[, cols_to_keep_after_nzv, drop = FALSE]
-  X_test_nzv_filtered <- X_test_df[, cols_to_keep_after_nzv, drop = FALSE]
-
+  # Remove NZV filtering: do not filter features by near zero variance, rely on ANOVA feature selection only
   # ANOVA feature selection to reduce dimensionality
-  num_features_to_select_anova <- min(1000, ncol(X_train_nzv_filtered))
+  num_features_to_select_anova <- min(1000, ncol(X_train_df))
   selected_feature_names_anova <- character(0)
 
-  if (ncol(X_train_nzv_filtered) > 0 && num_features_to_select_anova > 0) {
+  if (ncol(X_train_df) > 0 && num_features_to_select_anova > 0) {
       # Calculate F-values for all features
-      f_values <- apply(X_train_nzv_filtered, 2, function(col) calculate_f_value_svmrbf(col, y_train_factor))
+      f_values <- apply(X_train_df, 2, function(col) calculate_f_value_svmrbf(col, y_train_factor))
       f_values[is.na(f_values)] <- 0
 
       if (all(f_values == 0)) {
-        warning("SVM RBF: All ANOVA F-values are zero. Using all features post-NZV.")
-        selected_feature_names_anova <- colnames(X_train_nzv_filtered)
+        warning("All ANOVA F-values are zero. Using all features.")
+        selected_feature_names_anova <- colnames(X_train_df)
       } else if (sum(f_values > 0) == 0) {
-         warning("SVM RBF: No features with non-zero F-value. Using all features post-NZV.")
-         selected_feature_names_anova <- colnames(X_train_nzv_filtered)
+         warning("No features with non-zero F-value.")
+         selected_feature_names_anova <- colnames(X_train_df)
       } else {
         # Select top features based on F-values
         ordered_indices <- order(f_values, decreasing = TRUE)
         num_to_actually_select <- min(num_features_to_select_anova, sum(f_values > 0))
-        selected_feature_names_anova <- colnames(X_train_nzv_filtered)[ordered_indices[1:num_to_actually_select]]
+        selected_feature_names_anova <- colnames(X_train_df)[ordered_indices[1:num_to_actually_select]]
       }
   } else { 
-      selected_feature_names_anova <- colnames(X_train_nzv_filtered) 
+      selected_feature_names_anova <- colnames(X_train_df) 
   }
   
   # Apply feature selection to both training and test sets
-  X_train_selected_df <- as.data.frame(X_train_nzv_filtered[, selected_feature_names_anova, drop = FALSE])
-  X_test_selected_df <- as.data.frame(X_test_nzv_filtered[, selected_feature_names_anova, drop = FALSE])
+  X_train_selected_df <- as.data.frame(X_train_df[, selected_feature_names_anova, drop = FALSE])
+  X_test_selected_df <- as.data.frame(X_test_df[, selected_feature_names_anova, drop = FALSE])
 
   return(list(
     X_train_processed = X_train_selected_df,
@@ -97,7 +89,6 @@ preprocess_data_svmrbf <- function(X_train_df, X_test_df, y_train_df, y_test_df)
 
 # Function to train an SVM RBF model
 train_svmrbf_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
-  
   # Preprocess data
   processed_data <- preprocess_data_svmrbf(X_train_df, X_test_df, y_train_df, y_test_df)
   
@@ -106,60 +97,91 @@ train_svmrbf_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   X_test_selected_df <- processed_data$X_test_processed
   y_train_factor <- processed_data$y_train_factor
   y_test_numeric_output <- processed_data$y_test_numeric
-  selected_feature_names_anova <- processed_data$selected_feature_names
+  selected_feature_names <- processed_data$selected_feature_names
   all_original_features <- processed_data$all_original_features
   positive_class_label_factor <- processed_data$positive_class_label
   
   # Convert to matrix format for SVM
   X_train_selected_mat <- as.matrix(X_train_selected_df)
-
-  # Train SVM model with RBF kernel (scaling handled by SVM)
-  svm_model_rbf <- svm(X_train_selected_mat, y_train_factor, kernel = "radial", probability = TRUE, scale = TRUE)
-  
-  # Convert test data to matrix format
   X_test_selected_mat <- as.matrix(X_test_selected_df)
+
+  # Bootstrapping parameters
+  n_bootstraps <- 25
+  n_samples_train <- nrow(X_train_selected_df)
   
-  # Create prediction probabilities
-  y_pred_svm_factor <- predict(svm_model_rbf, X_test_selected_mat, probability = TRUE)
-  y_prob_values_matrix <- attr(y_pred_svm_factor, "probabilities")
-  y_pred_prob_vector <- y_prob_values_matrix[, positive_class_label_factor]
-  y_pred_numeric <- as.numeric(y_pred_svm_factor == positive_class_label_factor)
+  # Initialize variables for bootstrapping
+  all_importance_list <- list()
+  best_auc <- -Inf
+  best_model <- NULL
+  best_predictions <- NULL
 
-  # Create predictions dataframe
-  predictions_output_df <- data.frame(
-    y_test = y_test_numeric_output,
-    y_pred = y_pred_numeric,
-    y_pred_prob = as.numeric(y_pred_prob_vector)
-  )
+  for (i in 1:n_bootstraps) {
+    if (i %% 10 == 0 || i == n_bootstraps) {
+      message(paste("  Bootstrap iteration", i, "/", n_bootstraps))
+    }
 
-  # Calculate permutation-based feature importance
-  baseline_roc_obj <- roc(response = y_test_numeric_output, predictor = y_pred_prob_vector, quiet = TRUE, levels=c(0,1), direction = "<")
-  baseline_auc <- as.numeric(baseline_roc_obj$auc)
-  
-  perm_importance_values <- numeric(length(selected_feature_names_anova))
-  names(perm_importance_values) <- selected_feature_names_anova
+    # Bootstrap sampling
+    set.seed(42 + i)
+    boot_indices <- sample(1:n_samples_train, n_samples_train, replace = TRUE)
+    X_train_boot <- X_train_selected_df[boot_indices, , drop = FALSE]
+    y_train_boot <- y_train_factor[boot_indices]
 
-  for (feature_name in selected_feature_names_anova) {
-    X_test_permuted_df <- X_test_selected_df 
-    original_col_values <- X_test_permuted_df[[feature_name]]
-    X_test_permuted_df[[feature_name]] <- sample(original_col_values)
-    X_test_permuted_mat <- as.matrix(X_test_permuted_df)
-    
-    perm_pred_svm_factor <- predict(svm_model_rbf, X_test_permuted_mat, probability = TRUE)
-    perm_prob_matrix <- attr(perm_pred_svm_factor, "probabilities")
-    perm_pred_prob_vector <- perm_prob_matrix[, positive_class_label_factor]
-    
-    permuted_roc_obj <- roc(response = y_test_numeric_output, predictor = perm_pred_prob_vector, quiet = TRUE, levels=c(0,1), direction = "<")
-    permuted_auc <- as.numeric(permuted_roc_obj$auc)
-    perm_importance_values[feature_name] <- baseline_auc - permuted_auc
+    # Train SVM model on bootstrap sample
+    svm_model_boot <- svm(as.matrix(X_train_boot), y_train_boot, kernel = "radial", probability = TRUE, scale = TRUE)
+
+    # Predict on test data
+    y_pred_svm_factor <- predict(svm_model_boot, X_test_selected_mat, probability = TRUE)
+    y_prob_values_matrix <- attr(y_pred_svm_factor, "probabilities")
+    y_pred_prob_vector <- y_prob_values_matrix[, positive_class_label_factor]
+
+    # Calculate AUC for the current bootstrap model
+    roc_obj <- roc(response = y_test_numeric_output, predictor = y_pred_prob_vector, quiet = TRUE, levels = c(0, 1), direction = "<")
+    current_auc <- as.numeric(roc_obj$auc)
+
+    # Track the best model
+    if (current_auc > best_auc) {
+      best_auc <- current_auc
+      best_model <- svm_model_boot
+      best_predictions <- data.frame(
+        y_test = y_test_numeric_output,
+        y_pred = as.numeric(y_pred_svm_factor == positive_class_label_factor),
+        y_pred_prob = as.numeric(y_pred_prob_vector)
+      )
+    }
+
+    # Permutation-based feature importance for the current bootstrap
+    perm_importance_values <- numeric(length(selected_feature_names))
+    names(perm_importance_values) <- selected_feature_names
+
+    for (feature_name in selected_feature_names) {
+      X_test_permuted_df <- X_test_selected_df
+      original_col_values <- X_test_permuted_df[[feature_name]]
+      X_test_permuted_df[[feature_name]] <- sample(original_col_values)
+      X_test_permuted_mat <- as.matrix(X_test_permuted_df)
+
+      perm_pred_svm_factor <- predict(svm_model_boot, X_test_permuted_mat, probability = TRUE)
+      perm_prob_matrix <- attr(perm_pred_svm_factor, "probabilities")
+      perm_pred_prob_vector <- perm_prob_matrix[, positive_class_label_factor]
+
+      permuted_roc_obj <- roc(response = y_test_numeric_output, predictor = perm_pred_prob_vector, quiet = TRUE, levels = c(0, 1), direction = "<")
+      permuted_auc <- as.numeric(permuted_roc_obj$auc)
+      perm_importance_values[feature_name] <- current_auc - permuted_auc
+    }
+
+    # Save importance values for this bootstrap iteration
+    all_importance_list[[i]] <- perm_importance_values
   }
-  
+
+  # Aggregate feature importance across bootstraps
+  importance_matrix <- do.call(rbind, all_importance_list)
+  avg_importance <- colMeans(importance_matrix, na.rm = TRUE)
+
   feature_importance_df <- data.frame(
-    Feature = names(perm_importance_values),
-    Value = perm_importance_values
+    Feature = names(avg_importance),
+    Value = avg_importance
   )
 
-  # Add any features not used in modeling with zero importance
+  # Add features not used in modeling with zero importance
   features_not_in_model <- setdiff(all_original_features, feature_importance_df$Feature)
   if (length(features_not_in_model) > 0) {
     zero_importance_df <- data.frame(
@@ -168,12 +190,34 @@ train_svmrbf_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
     )
     feature_importance_df <- rbind(feature_importance_df, zero_importance_df)
   }
-  
+
   # Sort feature importance by absolute value
   feature_importance_df <- feature_importance_df %>% arrange(desc(abs(Value)))
 
+  # Retrain the final model on the entire dataset
+  final_model <- svm(
+    as.matrix(X_train_selected_df), y_train_factor,
+    kernel = "radial",
+    probability = TRUE,
+    scale = TRUE
+  )
+
+  # Use the final model to make predictions on the test set
+  final_predictions <- predict(final_model, X_test_selected_mat, probability = TRUE)
+  final_prob_matrix <- attr(final_predictions, "probabilities")
+  final_y_pred_prob_vector <- final_prob_matrix[, positive_class_label_factor]
+  final_y_pred_numeric <- as.numeric(final_predictions == positive_class_label_factor)
+
+  # Update predictions dataframe with final model predictions
+  predictions_output_df <- data.frame(
+    y_test = y_test_numeric_output,
+    y_pred = final_y_pred_numeric,
+    y_pred_prob = as.numeric(final_y_pred_prob_vector)
+  )
+
+  # Return the final model and updated predictions
   return(list(
-    model_object = svm_model_rbf,
+    model_object = final_model,
     predictions_df = predictions_output_df,
     raw_feature_importance = feature_importance_df
   ))

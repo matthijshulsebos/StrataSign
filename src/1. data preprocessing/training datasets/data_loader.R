@@ -143,3 +143,13 @@ create_features <- function(counts_log_transformed, annots_list) {
     ) %>%
     select(sample_ID, gene, cluster_ID, gene_cluster, log_normalized_count)
 }
+
+
+# Select representative samples
+select_representative_samples <- function(table_s1) {
+  table_s1 %>%
+    group_by(patient_ID, tissue) %>%
+    arrange(desc(Use.in.Clustering.Model. == "Yes"), sample_ID) %>%
+    slice(1) %>%
+    ungroup()
+}

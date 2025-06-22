@@ -25,26 +25,16 @@ preprocess_data_lasso <- function(X_train_df, X_test_df, y_train_df, y_test_df) 
   # Store original feature names
   original_features_train <- colnames(X_train_df)
 
-  # Near zero variance filtering
-  nzv_to_remove_names <- nearZeroVar(X_train_df, saveMetrics = FALSE, names = TRUE)
-
-  # Feature cols to keep after removing nzv features
-  features_to_keep <- setdiff(original_features_train, nzv_to_remove_names)
-
-  # Apply nzv filter to both sets
-  X_train_filtered <- X_train_df[, features_to_keep, drop = FALSE]
-  X_test_filtered <- X_test_df[, features_to_keep, drop = FALSE]
-
-  # Convert feature data to matrix format for glmnet
-  X_train_matrix <- as.matrix(X_train_filtered)
-  X_test_matrix <- as.matrix(X_test_filtered)
+  # No near zero variance filtering for LASSO
+  X_train_matrix <- as.matrix(X_train_df)
+  X_test_matrix <- as.matrix(X_test_df)
 
   return(list(
     X_train_matrix = X_train_matrix,
     X_test_matrix = X_test_matrix,
     y_train_numeric = y_train_numeric,
     y_test_numeric = y_test_numeric,
-    kept_feature_names = features_to_keep,
+    kept_feature_names = original_features_train,
     all_original_feature_names = original_features_train
   ))
 }
@@ -53,7 +43,7 @@ preprocess_data_lasso <- function(X_train_df, X_test_df, y_train_df, y_test_df) 
 # Train LASSO model with bootstrapping
 train_lasso_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   
-  message("Preprocessing data for LASSO...")
+  # Preprocess the data for LASSO
   processed_data <- preprocess_data_lasso(X_train_df, X_test_df, y_train_df, y_test_df)
   
   # Set preprocessed variables
@@ -63,8 +53,6 @@ train_lasso_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   y_test_numeric_output <- processed_data$y_test_numeric
   kept_feature_names <- processed_data$kept_feature_names
   all_original_feature_names <- processed_data$all_original_feature_names
-
-  message("Training LASSO model with bootstrapping...")
 
   # Set bootstrapping parameters
   n_bootstraps <- 100
@@ -86,69 +74,43 @@ train_lasso_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
     if (i %% 10 == 0 || i == n_bootstraps) {
         message(paste("  Bootstrap iteration", i, "/", n_bootstraps))
     }
-
-    # Shift sampling for each bootstrap iteration
     set.seed(42 + i)
-    
-    # Perform bootstrap sampling
     boot_indices <- sample(1:n_samples_train, n_samples_train, replace = TRUE)
     X_train_boot_matrix <- X_train_matrix[boot_indices, , drop = FALSE]
     y_train_boot_numeric <- y_train_numeric[boot_indices]
-    
-    # Fit LASSO model with cv on the bootstrap sample
+
+    # Fit LASSO model on bootstrapped data
     cv_fit_boot <- cv.glmnet(X_train_boot_matrix, y_train_boot_numeric, 
                              alpha = 1,
                              family = "binomial",
-                             nfolds = 3,  # Changed from 5 to 3
+                             nfolds = 3,
                              type.measure = "deviance",
                              standardize = TRUE
     )
-    
-    # Check if this is the best model (lower deviance is better)
-    current_deviance <- min(cv_fit_boot$cvm, na.rm = TRUE)
-    if (current_deviance < best_deviance) {
-      best_deviance <- current_deviance
-      best_model <- cv_fit_boot
-      best_predictions <- predict(cv_fit_boot, X_test_matrix, s = "lambda.min", type = "response")[,1]
-    }
-    
-    # Get all non-zero coefficients
+
+    # Retrieve importance metrics
     coef_vector_boot_sparse <- coef(cv_fit_boot, s = "lambda.min")
 
-    # Create a vector for all coefficients and set all values to 0
+    # Init 0 vector where coefficients will be stored
     coef_vector_boot_dense <- rep(0, length(all_possible_coef_names))
 
-    # Assign names to the coefficient vector
+    # Set names for the dense 0 vector
     names(coef_vector_boot_dense) <- all_possible_coef_names
-    
-    # Get common coefficients which is the same as sparse coefficients
+
+    # Combine all possible coefficients with actual coefficients
     common_coef_names <- intersect(names(coef_vector_boot_dense), rownames(coef_vector_boot_sparse))
 
-    # Assign the non zero coefficients to the 0 vector
+    # Fill the dense vector with the sparse coefficients
     coef_vector_boot_dense[common_coef_names] <- coef_vector_boot_sparse[common_coef_names, 1]
 
-    # Save coefficients for this bootstrap run
+    # Store the coefficients for this bootstrap iteration
     all_coefs_list[[i]] <- coef_vector_boot_dense
   }
-  message("Bootstrap loop finished.")
-  
-  # Use predictions from the best model
-  y_pred_prob_vector <- best_predictions
-  y_pred_numeric <- ifelse(y_pred_prob_vector > 0.5, 1, 0)
-  
-  # Create a dataframe for predictions
-  predictions_output_df <- data.frame(
-    y_test = y_test_numeric_output,
-    y_pred = y_pred_numeric,
-    y_pred_prob = as.numeric(y_pred_prob_vector)
-  )
-  
-  message("Calculating feature importance for LASSO...")
 
-  # Transpose the list of coefficient vectors into a matrix
+  # Calculate feature importance across bootstraps for LASSO and first concat bootstraps coefficients
   coef_matrix_all_bootstraps <- do.call(rbind, all_coefs_list)
 
-  # Calculate the average of non zero coefficients across all bootstraps
+  # Apply function to calculate average non-zero coefficients
   avg_non_zero_coeffs <- apply(coef_matrix_all_bootstraps, 2, function(feature_coeffs_across_bootstraps) {
     non_zero_vals <- feature_coeffs_across_bootstraps[feature_coeffs_across_bootstraps != 0]
     if (length(non_zero_vals) > 0) {
@@ -157,14 +119,14 @@ train_lasso_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
       0
     }
   })
-  
+
   # Create feature importance dataframe
   feature_importance_df <- data.frame(
     Feature = names(avg_non_zero_coeffs),
     Value = avg_non_zero_coeffs
   ) %>% filter(Feature != "(Intercept)")
 
-  # Add any features not used in modeling with zero importance
+  # Add zero importance for features not in the model
   features_not_in_model <- setdiff(all_original_feature_names, feature_importance_df$Feature)
   if (length(features_not_in_model) > 0) {
     zero_importance_df <- data.frame(
@@ -178,10 +140,31 @@ train_lasso_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   feature_importance_df <- feature_importance_df %>%
     arrange(desc(abs(Value)))
 
+  # Retrain the final model on the entire dataset
+  final_model <- cv.glmnet(
+    X_train_matrix, y_train_numeric,
+    alpha = 1,
+    family = "binomial",
+    nfolds = 3,
+    type.measure = "deviance",
+    standardize = TRUE
+  )
 
-  # Return the best model from bootstrapping
+  # Predict on the test set using the final model
+  final_predictions <- predict(final_model, X_test_matrix, s = "lambda.min", type = "response")[, 1]
+
+  # Convert predictions to binary labels
+  final_y_pred_numeric <- ifelse(final_predictions > 0.5, 1, 0)
+
+  # Create output dataframe with predictions
+  predictions_output_df <- data.frame(
+    y_test = y_test_numeric_output,
+    y_pred = final_y_pred_numeric,
+    y_pred_prob = as.numeric(final_predictions)
+  )
+  
   return(list(
-    model_object = best_model,
+    model_object = final_model,
     predictions_df = predictions_output_df,
     raw_feature_importance = feature_importance_df
   ))

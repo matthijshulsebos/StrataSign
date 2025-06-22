@@ -29,18 +29,10 @@ preprocess_data_lgbm <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   y_train_numeric <- as.numeric(y_train_factor == positive_class_label)
   y_test_numeric <- as.numeric(y_test_factor == positive_class_label)
 
-  # Near zero variance filter
-  nzv_features <- nearZeroVar(X_train_df, saveMetrics = FALSE, names = TRUE)
-  cols_to_keep_after_nzv <- setdiff(colnames(X_train_df), nzv_features)
-  
-  # Apply nzv filter to both sets  
-  X_train_filtered <- X_train_df[, cols_to_keep_after_nzv, drop = FALSE]
-  X_test_filtered <- X_test_df[, cols_to_keep_after_nzv, drop = FALSE]
-
   # Convert to matrix
-  X_train_matrix <- as.matrix(X_train_filtered)
-  X_test_matrix <- as.matrix(X_test_filtered)
-  
+  X_train_matrix <- as.matrix(X_train_df)
+  X_test_matrix <- as.matrix(X_test_df)
+
   # Create LightGBM format
   lgb_train_data <- lgb.Dataset(data = X_train_matrix, label = y_train_numeric)
 
@@ -49,7 +41,7 @@ preprocess_data_lgbm <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
     X_test_matrix_for_predict = X_test_matrix,
     y_test_numeric_for_output = y_test_numeric,
     all_original_features = all_original_features_train,
-    kept_feature_names = cols_to_keep_after_nzv
+    kept_feature_names = all_original_features_train
   ))
 }
 
@@ -65,21 +57,19 @@ train_lightgbm_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   all_original_features <- processed_data$all_original_features
   kept_feature_names <- processed_data$kept_feature_names
 
-  message("LightGBM: Starting hyperparameter tuning with lgb.cv...")
-
   # Set seed
   set.seed(42)
 
   # Define hyperparameter grid
   tuning_grid_lgbm_cv <- expand.grid(
-    learning_rate = c(0.1),              # Reduced from 2 to 1
-    num_leaves = c(31),                   # Reduced from 2 to 1
-    max_depth = c(6),                     # Reduced from 2 to 1
-    feature_fraction = c(0.8),            # Reduced from 2 to 1
-    bagging_fraction = c(0.8),            # Reduced from 2 to 1
-    min_child_samples = c(10),            # Reduced from 2 to 1
-    lambda_l1 = c(0),                     # Reduced from 2 to 1
-    lambda_l2 = c(0),                     # Reduced from 2 to 1
+    learning_rate = c(0.05, 0.1),
+    num_leaves = c(15, 31),
+    max_depth = c(4, 6),
+    feature_fraction = c(0.8),
+    bagging_fraction = c(0.8),
+    min_child_samples = c(10),
+    lambda_l1 = c(0),
+    lambda_l2 = c(0),
     stringsAsFactors = FALSE
   )
 
@@ -124,12 +114,11 @@ train_lightgbm_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
         verbose = -1
       )
       
-      # Force garbage collection after each CV run
+      # Force garbage collection after each cv run
       gc()
       
     }, error = function(e) {
-      warning(paste("lgb.cv failed for param set", i, ":", e$message))
-      # Force garbage collection even on error
+      warning("Cross validation failed.")
       gc()
     })
 
@@ -175,6 +164,7 @@ train_lightgbm_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
         stringsAsFactors = FALSE
     )
   } else {
+    # If no importance create empty dataframe
     feature_importance_df <- data.frame(Feature = character(0), Value = numeric(0), stringsAsFactors = FALSE)
   }
   
@@ -188,6 +178,7 @@ train_lightgbm_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
     feature_importance_df <- rbind(feature_importance_df, zero_importance_df)
   }
   
+  # Sort feature importance by absolute value
   feature_importance_df <- feature_importance_df %>%
     arrange(desc(abs(Value)))
 

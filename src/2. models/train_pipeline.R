@@ -24,7 +24,7 @@ extract_active_items <- function(config_list, item_name) {
   # Filters for items marked as true in the config
   active_items <- names(config_list)[unlist(config_list)] 
   if (length(active_items) == 0) {
-    warning(paste("No active", item_name, "found (all flags are false or list is empty)."))
+    warning(paste("No active", item_name, "found."))
   }
   return(active_items)
 }
@@ -49,7 +49,7 @@ results_to_output <- function(model_results, output_paths_list) {
   }
 
   # Save model object
-  if (!is.null(model_results$model_object) && !is.null(output_paths_list$model)) {
+  if (!is.null(model_results$model_object)) {
     # Ensure directory exists
     dir.create(dirname(output_paths_list$model), recursive = TRUE, showWarnings = FALSE) 
     tryCatch({
@@ -59,50 +59,38 @@ results_to_output <- function(model_results, output_paths_list) {
       warning(paste("Error saving model object:", e$message))
     })
   } else {
-    warning("Model object or model output path is empty.")
+    warning("Model object is empty.")
   }
 
-  # Save predictions expects df with at least y_test and y_pred cols
-  if (!is.null(model_results$predictions_df) && !is.null(output_paths_list$predictions)) {
+  if (!is.null(model_results$predictions_df)) {
     message(paste("Saving predictions to", output_paths_list$predictions))
+
     # Ensure directory exists
     dir.create(dirname(output_paths_list$predictions), recursive = TRUE, showWarnings = FALSE) 
     
-    predictions_to_save <- as.data.frame(model_results$predictions_df)
-    
     # Ensure the required columns are present
     required_prediction_cols <- c("y_test", "y_pred")
-    if (!all(required_prediction_cols %in% colnames(predictions_to_save))) {
-      warning(paste("Predictions output does not contain the required columns."))
+    if (!all(required_prediction_cols %in% colnames(model_results$predictions_df))) {
+      warning("Predictions output does not contain the required columns.")
     } else {
-        tryCatch({
-          # Save predictions to csv
-          write.csv(predictions_to_save, output_paths_list$predictions, row.names = FALSE) 
-        }, error = function(e) {
-          warning(paste("Error saving predictions:", e$message))
-        })
+      write.csv(model_results$predictions_df, output_paths_list$predictions, row.names = FALSE) 
     }
   } else {
     warning("Predictions output or predictions output path is empty.")
   }
 
-  # Save feature importance expects a data frame with feature and value columns
-  if (!is.null(model_results$raw_feature_importance) && !is.null(output_paths_list$feature_importance)) {
+  if (!is.null(model_results$raw_feature_importance)) {
     message(paste("Saving feature importance to", output_paths_list$feature_importance))
+
     # Ensure directory exists
     dir.create(dirname(output_paths_list$feature_importance), recursive = TRUE, showWarnings = FALSE)
     
-    feature_importance_df <- as.data.frame(model_results$raw_feature_importance)
-    if (!all(c("Feature", "Value") %in% colnames(feature_importance_df))) {
+    if (!all(c("Feature", "Value") %in% colnames(model_results$raw_feature_importance))) {
       warning("Feature importance output does not have the required columns.")
     }
     
-    tryCatch({
-      # Save feature importance to CSV
-      write.csv(feature_importance_df, output_paths_list$feature_importance, row.names = FALSE)
-    }, error = function(e) {
-      warning(paste("Error saving feature importance:", e$message))
-    })
+    # Save feature importance to CSV
+    write.csv(model_results$raw_feature_importance, output_paths_list$feature_importance, row.names = FALSE)
   } else {
     warning("Feature importance or feature importance output path is empty.")
   }
@@ -122,25 +110,19 @@ source_all_model_scripts <- function(modeling_dir_path) {
     if (length(r_scripts) > 0) {
       message(paste("Found", length(r_scripts), "training scripts in", modeling_dir_path, ":"))
       for (script_path in r_scripts) {
-        message(paste("Sourcing:", script_path))
-        tryCatch({
-          # Ensure the training script contains valid code
-          source(script_path)
-        }, error = function(e) {
-          warning(paste("Error sourcing script", script_path, ":", e$message))
-        })
+        source(script_path)
       }
-    } else { # if (length(r_scripts) > 0)
-      warning(paste("No training scripts found in", modeling_dir_path))
+    } else {
+      warning("No training scripts found.")
     }
   } else {
-    warning(paste("Modeling directory not found, cannot source scripts:", modeling_dir_path))
+    warning("Modeling directory not found.")
   }
-  message("Finished loading model training scripts.")
 }
 
 # Main function orchestrating the training pipeline
 run_training_pipeline <- function(config_obj) { 
+  message("Starting training pipeline.")
   
   # Source all model training scripts
   modeling_dir_path <- file.path("src", "2. models", "modeling") 
@@ -157,13 +139,13 @@ run_training_pipeline <- function(config_obj) {
 
   # Validate extracted parameters
   if (length(norm_types) == 0) {
-    stop("Processing stopped: No norm_type selected for processing in config.yaml")
+    stop("No norm_type selected for processing in config.yaml")
   }
   if (length(cell_types) == 0) {
-    stop("Processing stopped: No cell_type selected for processing in config.yaml")
+    stop("No cell_type selected for processing in config.yaml")
   }
   if (length(gene_types) == 0) {
-    stop("Processing stopped: No gene_type selected for processing in config.yaml")
+    stop("No gene_type selected for processing in config.yaml")
   }
   if (is.null(models_to_run_list) || length(models_to_run_list) == 0) {
     stop("No models specified or model list is empty in config.yaml")
@@ -177,11 +159,6 @@ run_training_pipeline <- function(config_obj) {
     # Ensures character vectors are not converted to factors
     stringsAsFactors = FALSE 
   )
-
-  if (nrow(iteration_grid) == 0) {
-    message("No combinations to process based on current config.yaml settings.")
-    return()
-  }
 
   # Loop through each combination of dataset parameters
   for (i in 1:nrow(iteration_grid)) {
@@ -202,7 +179,7 @@ run_training_pipeline <- function(config_obj) {
 
     # Skip to the next iteration if dataset folder doesn't exist
     if (!dir.exists(current_dataset_folder)) {
-      warning(paste("Dataset folder not found, skipping:", current_dataset_folder, "for", current_iter_id))
+      warning(paste("Dataset folder not found:", current_dataset_folder, "for", current_iter_id))
       next 
     }
 
@@ -214,21 +191,24 @@ run_training_pipeline <- function(config_obj) {
 
     # Check if all required data files exist for the current combination
     required_files <- c(X_train_file, X_test_file, y_train_file, y_test_file)
+
     if (!all(sapply(required_files, file.exists))) {
       missing_files_str <- paste(required_files[!sapply(required_files, file.exists)], collapse = ", ")
-      warning(paste("One or more data files missing for", current_iter_id, ". Missing:", missing_files_str))
+      stop(paste("One or more data files missing for", current_iter_id, ". Missing:", missing_files_str))
       next 
     }
     
     # Load datasets
     datasets <- load_dataset_csvs(X_train_file, X_test_file, y_train_file, y_test_file)
 
+    message("Loaded all datasets for current combination.")
+
     # Loop through each model specified in the configuration
     for (model_entry in models_to_run_list) {
       # Check if the train flag for the model is true
       if (isTRUE(model_entry$train)) { 
         model_name <- model_entry$name
-        message(paste0("Training model: ", model_name))
+        message(paste0("\nTraining model: ", model_name))
 
         # Init output variables
         model_results <- NULL
@@ -241,8 +221,7 @@ run_training_pipeline <- function(config_obj) {
           
           # Check if the dynamically constructed function name exists
           if (!exists(model_function_name, mode = "function")) {
-            warning(paste("Training function '", model_function_name))
-            next 
+            stop(paste("Training function '", model_function_name, "not found for model", model_name, ".")) 
           }
           
           # Get the actual function object
@@ -255,16 +234,9 @@ run_training_pipeline <- function(config_obj) {
             y_train_df = datasets$y_train_df,
             y_test_df = datasets$y_test_df
           )
-          model_train_successful <- TRUE
         }, error = function(e) {
-          warning(paste("Error training model", model_name, "for", current_iter_id, ":", e$message, "Skipping this model."))
+          stop(paste("Error training model", model_name, "for", current_iter_id, ":", e$message))
         })
-
-        # Skip saving if training failed or returned no results
-        if (!model_train_successful || is.null(model_results)) {
-           warning(paste("Model training failed or returned NULL for", model_name, "on", current_iter_id, ". Skipping save."))
-           next 
-        }
         
         # Create output directory for the current model and dataset combination
         output_dir_rel_to_project_root <- create_model_output_dir(
@@ -285,22 +257,16 @@ run_training_pipeline <- function(config_obj) {
           predictions = predictions_path
         )
 
-        # Save the model results
-        tryCatch({
-          results_to_output( 
-            model_results = model_results,
-            output_paths_list = output_paths_list
-          )
-        }, error = function(e) {
-          warning(paste("Error saving outputs for model", model_name))
-        })
+        results_to_output( 
+          model_results = model_results,
+          output_paths_list = output_paths_list
+        )
         
-        message(paste0("Finished model: ", model_name))
+        message(paste("Finished model:", model_name))
       } else {
         # Skip training if the train flag is not true
       }
     }
-    message(paste0("Finished combination."))
   }
 }
 

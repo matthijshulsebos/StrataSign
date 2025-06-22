@@ -40,6 +40,7 @@ preprocess_data_spls <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   X_test_aligned <- data.frame(matrix(0.0, nrow = nrow(X_test_df), ncol = length(cols_to_keep_after_nzv)))
   colnames(X_test_aligned) <- cols_to_keep_after_nzv
   
+  # Filter test set to keep only columns that are also in training set
   common_cols_in_test <- intersect(cols_to_keep_after_nzv, colnames(X_test_df))
   if(length(common_cols_in_test) > 0) {
       X_test_aligned[, common_cols_in_test] <- X_test_df[, common_cols_in_test, drop = FALSE]
@@ -79,8 +80,6 @@ train_spls_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   X_train_matrix <- as.matrix(X_train_processed)
   X_test_matrix <- as.matrix(X_test_processed)
   y_train_numeric <- as.numeric(y_train_factor == positive_class_label_factor)
-
-  message("sPLS: Starting hyperparameter tuning...")
   
   # Set seed
   set.seed(42)
@@ -147,8 +146,6 @@ train_spls_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
       best_params <- current_params
     }
   }
-  
-  message("Best sPLS parameters: K=", best_params$K, ", eta=", best_params$eta, ", kappa=", best_params$kappa)
 
   # Train final model with best parameters
   final_model <- NULL
@@ -165,22 +162,14 @@ train_spls_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
       fit = "simpls"
     )
   }, error = function(e) {
-    warning(paste("Error training sPLS model:", e$message))
-    empty_predictions_df <- data.frame(
-        y_test = y_test_numeric_output, 
-        y_pred = rep(NA, length(y_test_numeric_output)), 
-        y_pred_prob = rep(NA, length(y_test_numeric_output))
-    )
-    return(list(
-      model_object = NULL,
-      predictions_df = empty_predictions_df,
-      raw_feature_importance = data.frame(Feature = all_original_features, Value = 0, stringsAsFactors = FALSE)
-    ))
+    stop("Error training sPLS model.")
   })
 
   # Create prediction probabilities
   y_pred_raw_scores <- predict(final_model, X_test_matrix)
   y_pred_numeric <- ifelse(y_pred_raw_scores > 0.5, 1, 0)
+
+  # Values can be outside 0 and 1 range so set them within them
   y_pred_prob <- pmin(pmax(as.numeric(y_pred_raw_scores), 0), 1)
   
   # Create predictions dataframe
@@ -198,14 +187,14 @@ train_spls_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
     importance_values <- abs(final_model$betahat[, 1])
     names(importance_values) <- colnames(X_train_matrix)
     
-    # Update feature importance for modeled features
+    # Overwrite 0 feature importance for modeled features
     for (feature in names(importance_values)) {
       if (feature %in% feature_importance_df$Feature) {
         feature_importance_df$Value[feature_importance_df$Feature == feature] <- importance_values[feature]
       }
     }
   } else {
-    warning("sPLS: betahat not available for feature importance calculation")
+    stop("Betahat not available.")
   }
   
   # Sort by importance

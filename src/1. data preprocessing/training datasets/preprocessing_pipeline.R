@@ -15,17 +15,19 @@ CELL_TYPE_SETS <- list(
   lcam_lo = c(56, 34, 53, 10, 25, 54, 55, 57, 45, 14, 16),
   lcam_both = c(c(44, 9, 17, 28, 46, 11, 42), c(56, 34, 53, 10, 25, 54, 55, 57, 45, 14, 16)),
   macrophages = c(5, 8, 10, 11, 25, 32, 33, 35, 38, 42, 47, 54, 55, 57),
+  has_10_in_50pct = c(1, 10, 11, 13, 14, 17, 18, 19, 2, 20, 23, 25, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 42, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 7, 8, 9),
+  has_10_in_70pct = c(1, 10, 14, 18, 2, 25, 29, 30, 32, 33, 34, 35, 36, 38, 39, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59),
   all_clusters = NULL
 )
 
 # Load datasets
 datasets <- load_all_datasets()
 lung_ldm <- datasets$lung_ldm
-table_s1 <- datasets$table_s1
+table_s1 <- select_representative_samples(datasets$table_s1)
 annots_list <- datasets$annots_list
 hsa01100_genes <- datasets$hsa01100_genes
 
-# Retrieve datasets from lung_ldm
+# Datasets from Leader et al. 2021
 ds_matrix <- lung_ldm$dataset$ds[[1]]
 cell_metadata <- prepare_cell_metadata(lung_ldm, table_s1, DOUBLETS)
 umitab_filtered <- filter_umitab(ds_matrix, cell_metadata)
@@ -45,7 +47,7 @@ aggregate_umitab_to_long <- function(umitab, cell_metadata) {
   umitab_triplet$cell_ID <- colnames(umitab)[umitab_triplet$cell_idx]
   
   # Join with metadata and aggregate
-  message("Aggregating counts by sample-cluster-gene.")
+  message("Aggregating counts by sample, cell type, gene.")
   aggregated_data <- umitab_triplet %>%
     select(gene, cell_ID, count) %>%
     inner_join(cell_metadata %>% select(cell_ID, sample_ID, cluster_ID), by = "cell_ID") %>%
@@ -69,18 +71,20 @@ apply_celltype_normalization <- function(long_data) {
   celltype_totals <- long_data %>%
     group_by(sample_ID, cluster_ID) %>%
     summarise(celltype_total = sum(count), .groups = 'drop')
-  
+
   # Calculate global average cell type total
   global_avg_celltype_total <- mean(celltype_totals$celltype_total)
-  
+
   # Normalize counts by cell type totals and global average
-  long_data %>%
+  normalized_data <- long_data %>%
     left_join(celltype_totals, by = c("sample_ID", "cluster_ID")) %>%
     mutate(
       gene_fraction = ifelse(celltype_total > 0, count / celltype_total, 0),
       normalized_count = gene_fraction * global_avg_celltype_total
     ) %>%
     select(sample_ID, gene, cluster_ID, normalized_count)
+
+  return(normalized_data)
 }
 
 
@@ -96,8 +100,7 @@ filter_genes_by_type <- function(all_genes, gene_type) {
     return(sample(nonmetabolic_genes, length(metabolic_genes)))
   } else if (gene_type == "random") {
     set.seed(43)
-    sample_size <- min(length(metabolic_genes), length(all_genes))
-    return(sample(all_genes, sample_size))
+    return(sample(all_genes, length(metabolic_genes)))
   }
 }
 
@@ -257,6 +260,13 @@ run_global_approach <- function(aggregated_data) {
       save_results(final_data, "ctnorm_global", cell_type, gene_type)
     }
   }
+  
+  # Write sum per cell type per sample
+  global_sum <- global_ctnorm_data %>%
+    left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
+    group_by(tissue, sample_ID, cluster_ID) %>%
+    summarise(total_count = sum(normalized_count), .groups = 'drop')
+  write_csv(global_sum, file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_global.csv"))
 }
 
 
@@ -305,6 +315,13 @@ run_relative_approach <- function(umitab_filtered, cell_metadata_final) {
       save_results(final_data, "ctnorm_relative", cell_type, gene_type)
     }
   }
+  
+  # Write sum per cell type per sample
+  rel_sum <- relative_ctnorm_data %>%
+    left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
+    group_by(tissue, sample_ID, cluster_ID) %>%
+    summarise(total_count = sum(normalized_count), .groups = 'drop')
+  write_csv(rel_sum, file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_relative.csv"))
 }
 
 
@@ -343,6 +360,13 @@ run_read_depth_approach <- function(aggregated_data) {
       save_results(final_data, "read_depth", cell_type, gene_type)
     }
   }
+  
+  # Write sum per cell type per sample
+  read_depth_sum <- aggregated_data %>%
+    left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
+    group_by(tissue, sample_ID, cluster_ID) %>%
+    summarise(total_count = sum(count), .groups = 'drop')
+  write_csv(read_depth_sum, file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_read_depth.csv"))
 }
 
 
@@ -350,13 +374,113 @@ run_read_depth_approach <- function(aggregated_data) {
 message("Converting downsampled data to aggregated format.")
 aggregated_data <- aggregate_umitab_to_long(umitab_filtered, cell_metadata_final)
 
-# Run global approach (aggregated data)
+# Run global approach
 run_global_approach(aggregated_data)
 
-# Run relative approach (cell-level data)
+# Run relative approach
 run_relative_approach(umitab_filtered, cell_metadata_final)
 
-# Run read depth normalization approach (aggregated data)
+# Run read depth normalization approach
 run_read_depth_approach(aggregated_data)
 
 message("\n Preprocessing pipeline completed.")
+
+
+# THIS IS OPTIONAL FOR FIGURE 1CDE
+
+# Calculate metabolic gene proportions per sample and cell type at three normalization stages
+calculate_metabolic_proportions <- function(ds_matrix, cell_metadata, hsa01100_genes) {
+  message("Calculating metabolic proportions for raw, global, and relative normalization stages.")
+
+  metabolic_genes <- intersect(hsa01100_genes$SYMBOL, rownames(ds_matrix))
+  results <- list()
+  sample_ids <- unique(cell_metadata$sample_ID)
+
+  # Load annotation and sample tables for cell type and tissue lookup
+  annots_list <- readr::read_csv("base/input_tables/annots_list.csv", show_col_types = FALSE)
+  table_s1 <- readr::read_csv("base/input_tables/table_s1_sample_table.csv", show_col_types = FALSE)
+
+  # Raw (aggregate to long format)
+  message("Aggregating raw counts to long format.")
+  raw_long <- aggregate_umitab_to_long(ds_matrix, cell_metadata)
+
+  # Global normalization
+  message("Applying global cell type normalization.")
+  global_norm_long <- apply_celltype_normalization(raw_long)
+
+  # Relative normalization
+  message("Filter on metabolic genes.")
+  ds_metabolic <- ds_matrix[metabolic_genes, , drop=FALSE]
+  message("Applying CP-median normalization.")
+  rel_cpmed_long <- apply_cp_median_normalization(ds_metabolic, cell_metadata)
+  message("Applying cell type normalization.")
+  rel_norm_long <- apply_celltype_normalization(rel_cpmed_long)
+
+  total_steps <- length(sample_ids)
+  step <- 0
+  for (sample in sample_ids) {
+    step <- step + 1
+    message(sprintf("[Progress: %d/%d] Processing sample_ID: %s", step, total_steps, sample))
+    sample_clusters <- unique(cell_metadata$cluster_ID[cell_metadata$sample_ID == sample])
+    for (cluster in sample_clusters) {
+      # Read depth
+      raw_sub <- raw_long %>% filter(sample_ID == sample, cluster_ID == cluster)
+      total_raw <- sum(raw_sub$count)
+      metabolic_raw <- sum(raw_sub$count[raw_sub$gene %in% metabolic_genes])
+      prop_raw <- ifelse(total_raw > 0, metabolic_raw / total_raw, NA)
+
+      # Global normalization
+      global_sub <- global_norm_long %>% filter(sample_ID == sample, cluster_ID == cluster)
+      total_global <- sum(global_sub$normalized_count)
+      metabolic_global <- sum(global_sub$normalized_count[global_sub$gene %in% metabolic_genes])
+      prop_global <- ifelse(total_global > 0, metabolic_global / total_global, NA)
+
+      # Relative normalization
+      rel_sub <- rel_norm_long %>% filter(sample_ID == sample, cluster_ID == cluster)
+      total_relative <- sum(rel_sub$normalized_count)
+      metabolic_relative <- total_relative
+      prop_relative <- ifelse(total_relative > 0, metabolic_relative / total_relative, NA)
+
+      # Lookup cell type and tissue
+      cell_type_row <- annots_list[annots_list$cluster == cluster, ]
+      if (nrow(cell_type_row) == 0) {
+        cell_type <- NA
+      } else if (!is.na(cell_type_row$sub_lineage) && cell_type_row$sub_lineage != "") {
+        cell_type <- cell_type_row$sub_lineage
+      } else {
+        cell_type <- cell_type_row$lineage
+      }
+      tissue <- table_s1$tissue[table_s1$sample_ID == sample]
+      if (length(tissue) == 0) tissue <- NA
+      # Combine cell type and cluster ID
+      celltype_cluster <- if (!is.na(cell_type) && !is.na(cluster)) paste(cell_type, cluster, sep = "_") else NA
+
+      results[[length(results) + 1]] <- data.frame(
+        sample_ID = sample,
+        cluster_ID = cluster,
+        cell_type = cell_type,
+        celltype_cluster = celltype_cluster,
+        tissue = tissue,
+        metabolic_prop_raw = prop_raw,
+        metabolic_prop_global = prop_global,
+        metabolic_prop_relative = prop_relative,
+        metabolic_counts_raw = metabolic_raw,
+        total_counts_raw = total_raw,
+        metabolic_counts_global = metabolic_global,
+        total_counts_global = total_global,
+        metabolic_counts_relative = metabolic_relative,
+        total_counts_relative = total_relative
+      )
+    }
+  }
+  out <- do.call(rbind, results)
+  output_path <- file.path("output", "0. intermediates", "metabolic_proportions_by_normalization.csv")
+  dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
+  write_csv(out, output_path)
+  message("Metabolic proportions written to: ", output_path)
+  return(out)
+}
+
+
+# Calculate metabolic proportions efficiently
+#calculate_metabolic_proportions(ds_matrix, cell_metadata, hsa01100_genes)

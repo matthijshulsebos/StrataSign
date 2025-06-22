@@ -46,42 +46,34 @@ preprocess_data_svm <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   # Convert target to numeric where tumor is 1 and normal is 0
   y_test_numeric_output <- as.numeric(y_test_factor == positive_class_label_factor)
 
-  # Near zero variance filter
-  nzv_features <- nearZeroVar(X_train_df, saveMetrics = FALSE, names = TRUE)
-  cols_to_keep_after_nzv <- setdiff(colnames(X_train_df), nzv_features)
-  
-  # Apply NZV filter to both sets
-  X_train_nzv_filtered <- X_train_df[, cols_to_keep_after_nzv, drop = FALSE]
-  X_test_nzv_filtered <- X_test_df[, cols_to_keep_after_nzv, drop = FALSE]
-
   # ANOVA feature selection to reduce dimensionality
-  num_features_to_select_anova <- min(5000, ncol(X_train_nzv_filtered))
+  num_features_to_select_anova <- min(5000, ncol(X_train_df))
   selected_feature_names_anova <- character(0)
 
-  if (ncol(X_train_nzv_filtered) > 0 && num_features_to_select_anova > 0) {
+  if (ncol(X_train_df) > 0 && num_features_to_select_anova > 0) {
       # Calculate F-values for all features
-      f_values <- apply(X_train_nzv_filtered, 2, function(col) calculate_f_value_svm(col, y_train_factor))
+      f_values <- apply(X_train_df, 2, function(col) calculate_f_value_svm(col, y_train_factor))
       f_values[is.na(f_values)] <- 0
 
       if (all(f_values == 0)) {
-        warning("SVM Linear: All ANOVA F-values are zero. Using all features post-NZV.")
-        selected_feature_names_anova <- colnames(X_train_nzv_filtered)
+        warning("SVM Linear: All ANOVA F-values are zero. Using all features.")
+        selected_feature_names_anova <- colnames(X_train_df)
       } else if (sum(f_values > 0) == 0) {
-         warning("SVM Linear: No features with non-zero F-value. Using all features post-NZV.")
-         selected_feature_names_anova <- colnames(X_train_nzv_filtered)
+         warning("SVM Linear: No features with non-zero F-value. Using all features.")
+         selected_feature_names_anova <- colnames(X_train_df)
       } else {
         # Select top features based on F-values
         ordered_indices <- order(f_values, decreasing = TRUE)
         num_to_actually_select <- min(num_features_to_select_anova, sum(f_values > 0))
-        selected_feature_names_anova <- colnames(X_train_nzv_filtered)[ordered_indices[1:num_to_actually_select]]
+        selected_feature_names_anova <- colnames(X_train_df)[ordered_indices[1:num_to_actually_select]]
       }
   } else { 
-      selected_feature_names_anova <- colnames(X_train_nzv_filtered) 
+      selected_feature_names_anova <- colnames(X_train_df) 
   }
   
   # Apply feature selection to both training and test sets
-  X_train_selected_df <- as.data.frame(X_train_nzv_filtered[, selected_feature_names_anova, drop = FALSE])
-  X_test_selected_df <- as.data.frame(X_test_nzv_filtered[, selected_feature_names_anova, drop = FALSE])
+  X_train_selected_df <- as.data.frame(X_train_df[, selected_feature_names_anova, drop = FALSE])
+  X_test_selected_df <- as.data.frame(X_test_df[, selected_feature_names_anova, drop = FALSE])
 
   return(list(
     X_train_processed = X_train_selected_df,

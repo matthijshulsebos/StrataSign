@@ -256,7 +256,7 @@ create_model_performance_summary_plot <- function(perf_data, output_dir, target_
   }
 
   p_summary <- p_summary +
-    facet_wrap(~ Metric, scales = "free_y", ncol = 4) + 
+    facet_wrap(~ Metric, scales = "free_y", ncol = 3) + 
     scale_fill_viridis_d() +
     scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) + # Expands y-axis (or new x-axis if flipped) for text
     theme_bw() + 
@@ -295,7 +295,7 @@ generate_performance_plots <- function(performance_file = "output/2. models/mode
   project_root <- "c:/Users/mchul/Documents/StrataSign" 
   
   # Setup output directory using the explicit project root
-  output_dir <- file.path(project_root, "output/6. plots/performance")
+  output_dir <- file.path(project_root, "output/6. plots/figure 2")
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   message(sprintf("Ensuring output directory exists: %s", normalizePath(output_dir, mustWork = FALSE)))
 
