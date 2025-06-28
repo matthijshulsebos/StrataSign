@@ -172,17 +172,31 @@ run_all_intersector_lollipop_plots <- function(
         dir_create(current_figures_output_dir, recurse = TRUE)
 
         meta_scores_file <- file.path(current_input_dir, "meta_scores.csv")
-        
+        fold_changes_file <- file.path("output", "4. fold changes", type, cell_type_group, gene_set, "fold_changes.csv")
+
+        if (!file.exists(meta_scores_file)) {
+          message(paste("Meta scores file not found, skipping:", meta_scores_file))
+          next
+        }
+
         all_results <- read_csv(meta_scores_file, show_col_types = FALSE)
+
+        # If fold_change column is missing, try to load and join from fold_changes.csv
+        if (!"fold_change" %in% names(all_results)) {
+          if (file.exists(fold_changes_file)) {
+            fold_changes_df <- read_csv(fold_changes_file, show_col_types = FALSE)
+            all_results <- all_results %>%
+              left_join(fold_changes_df, by = c("feature_id" = "Feature")) %>%
+              rename(fold_change = Value)
+            message(paste("Added fold_change column from", fold_changes_file))
+          } else {
+            all_results <- all_results %>% mutate(fold_change = NA_real_)
+            message(paste("Warning: 'fold_change' column not found in", meta_scores_file, "and fold_changes.csv not found - adding as NA."))
+          }
+        }
 
         # Create lollipop plots
         if (nrow(all_results) > 0) { 
-          # Ensure 'fold_change' column exists, if not, add it as NA
-          if (!"fold_change" %in% names(all_results)) {
-            all_results <- all_results %>% mutate(fold_change = NA_real_)
-            message(paste("Warning: 'fold_change' column not found in", meta_scores_file, "- adding it as NA."))
-          }
-          
           lollipop_batches_dir_path <- file.path(current_figures_output_dir, "lollipop_batches")
           create_batched_lollipop_plots(
             all_results_data = all_results,
@@ -192,7 +206,7 @@ run_all_intersector_lollipop_plots <- function(
             max_features = lollipop_max_total_features
           )
         }
-        
+
         message("Lollipop plots for ", type, " normalization", cell_type_group, " cell types", gene_set, "genes.")
       }
     }

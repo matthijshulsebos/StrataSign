@@ -69,7 +69,7 @@ train_randomforest_model <- function(X_train_df, X_test_df, y_train_df, y_test_d
   # Set up cv
   control <- trainControl(
     method = "cv",
-    number = 5,
+    number = 3,
     classProbs = TRUE,
     summaryFunction = twoClassSummary,
     verboseIter = FALSE

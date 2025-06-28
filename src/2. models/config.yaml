@@ -8,7 +8,7 @@ training_parameters:
   # Choose the type of genes to include in the training
   gene_type:
     metabolic: true
-    nonmetabolic: false
+    nonmetabolic: true
     random: false
 
   # Choose the types of cells to train on
@@ -18,8 +18,8 @@ training_parameters:
     lcam_lo: false
     lcam_both: false
     all_clusters: true
-    has_10_in_50pct: true
-    has_10_in_70pct: true
+    has_10_in_50pct: false
+    has_10_in_70pct: false
 
   # Set which models to train
   models:

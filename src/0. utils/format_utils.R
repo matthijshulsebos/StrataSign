@@ -26,7 +26,7 @@ map_entrez_to_symbols <- function(entrez_ids) {
                        fromType = "ENTREZID",
                        toType = "SYMBOL",
                        OrgDb = org.Hs.eg.db)
-  column_names <- c("Entrez_ID", "Gene_Symbol")
+  column_names <- c("Entrez_ID", "Symbol")
   colnames(gene_symbols) <- column_names
   
   return(gene_symbols)

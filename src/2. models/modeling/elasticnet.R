@@ -126,8 +126,7 @@ train_elasticnet_model <- function(X_train_df, X_test_df, y_train_df, y_test_df)
     filter(Feature != "(Intercept)")
 
   # Add any features not used in modeling with zero importance
-  processed_data$kept_feature_names <- colnames(X_train_df)
-  features_not_in_model <- setdiff(original_features, feature_importance_df$Feature)
+  features_not_in_model <- setdiff(processed_data$kept_feature_names, feature_importance_df$Feature)
   if (length(features_not_in_model) > 0) {
     zero_importance_df <- data.frame(
       Feature = features_not_in_model,

@@ -143,7 +143,7 @@ compute_model_density <- function(all_features, model_names, eps=1e-10) {
 }
 
 
-# Scale single model score table
+# Scale single model score table based on rank
 scale_scores_for_model <- function(df, is_dense, threshold=0.7, eps=1e-10) {
   base_name <- paste0(unique(df$model_type), "_score")
   df0 <- select(df, feature_id, gene, sublineage, abs_value) %>%
@@ -157,8 +157,19 @@ scale_scores_for_model <- function(df, is_dense, threshold=0.7, eps=1e-10) {
       if (length(sel)==0) sel <- 1
       slice(ord, sel)
     } else cand
-    mn <- min(to_scale$abs_value); mx <- max(to_scale$abs_value)
-    scaled <- if (mx==mn) rep(0.75, nrow(to_scale)) else 0.5+0.5*(to_scale$abs_value-mn)/(mx-mn)
+    
+    # Rank-based scaling: scale between 0.5 and 1.0 based on rank position
+    n_features <- nrow(to_scale)
+    if (n_features == 1) {
+      scaled <- rep(0.75, n_features)
+    } else {
+      # Sort by abs_value descending to get ranks
+      to_scale <- arrange(to_scale, desc(abs_value))
+      ranks <- seq_len(n_features)
+      # Scale ranks 1 best and 0.5 worst
+      scaled <- 1.0 - 0.5 * (ranks - 1) / (n_features - 1)
+    }
+    
     upd <- tibble(feature_id=to_scale$feature_id, !!base_name:=scaled)
     df0 <- left_join(df0, upd, by="feature_id", suffix=c(".old",".new")) %>%
            mutate(!!base_name:=coalesce(.data[[paste0(base_name,".new")]], .data[[paste0(base_name,".old")]])) %>%
@@ -220,7 +231,7 @@ filter_and_write <- function(df, min_models, all_models, out_dir) {
 
 
 # Main intersector function
-find_feature_intersection <- function(models_dir, output_dir, min_models_occurrence, cell_type_filter_val, gene_type_filter_val, fold_changes_data = NULL) {
+find_feature_intersection <- function(models_dir, output_dir, min_models_occurrence, cell_type_filter_val, gene_type_filter_val, type = NULL) {
   dir_create(output_dir, recurse=TRUE)
 
   # Pass target_gene_type and target_cell_type to the updated function
@@ -240,6 +251,20 @@ find_feature_intersection <- function(models_dir, output_dir, min_models_occurre
     return(empty)
   }
 
+  # Find the corresponding fold_changes.csv file for this combination
+  fold_changes_path <- NULL
+  if (!is.null(type)) {
+    # Try to find the fold_changes.csv file in the same structure as the model files
+    fold_changes_candidate <- file.path("output", "4. fold changes", type, cell_type_filter_val, gene_type_filter_val, "fold_changes.csv")
+    if (file.exists(fold_changes_candidate)) {
+      fold_changes_path <- fold_changes_candidate
+    }
+  }
+  fold_changes_data <- NULL
+  if (!is.null(fold_changes_path)) {
+    fold_changes_data <- tryCatch(read_csv(fold_changes_path, show_col_types = FALSE), error = function(e) NULL)
+  }
+
   density_map <- compute_model_density(all_feat, models)
   score_tables<- build_model_score_tables(all_feat, density_map)
   merged <- merge_and_score(score_tables, fold_changes_data)
@@ -250,7 +275,7 @@ find_feature_intersection <- function(models_dir, output_dir, min_models_occurre
 
 
 # Process a single dataset type, cell type, and gene type combination
-process_dataset_cell_gene_combination <- function(type, cell_type, gene_type, base_models_dir, base_output_dir, min_models_param, fold_changes_data = NULL) {
+process_dataset_cell_gene_combination <- function(type, cell_type, gene_type, base_models_dir, base_output_dir, min_models_param) {
   models_dir <- file.path(base_models_dir, type)
   output_dir <- file.path(base_output_dir, type, cell_type, gene_type)
   
@@ -266,7 +291,7 @@ process_dataset_cell_gene_combination <- function(type, cell_type, gene_type, ba
     min_models_occurrence = min_models_param,
     cell_type_filter_val = cell_type,
     gene_type_filter_val = gene_type,
-    fold_changes_data = fold_changes_data
+    type = type
   )
   
   if (is.null(result) || nrow(result) == 0) {
@@ -306,20 +331,15 @@ run_intersector <- function(
   dataset_types_to_process = c("ctnorm_global", "ctnorm_relative", "read_depth"),
   cell_types_to_process = c("all_clusters", "macrophages", "lcam_hi", "lcam_lo", "lcam_both"),
   gene_types_to_process = c("metabolic", "nonmetabolic", "random"),
-  sublineage_color_map_path = "output/3. intersector/sublineage_colors.rds",
-  fold_changes_file = "output/4. fold changes/feature_fold_changes.csv"
+  sublineage_color_map_path = "output/3. intersector/sublineage_colors.rds"
 ) {
-  
-  # Load fold changes data
-  fold_changes_data <- read_csv(fold_changes_file, show_col_types = FALSE)
-  
   meta_score_files <- expand.grid(
     type = dataset_types_to_process,
     cell_type = cell_types_to_process,
     gene_type = gene_types_to_process,
     stringsAsFactors = FALSE
   ) %>%
-    pmap(~ process_dataset_cell_gene_combination(..1, ..2, ..3, base_models_dir, base_output_dir, min_models_param, fold_changes_data)) %>%
+    pmap(~ process_dataset_cell_gene_combination(..1, ..2, ..3, base_models_dir, base_output_dir, min_models_param)) %>%
     compact()
   
   generate_sublineage_color_map(meta_score_files, sublineage_color_map_path)

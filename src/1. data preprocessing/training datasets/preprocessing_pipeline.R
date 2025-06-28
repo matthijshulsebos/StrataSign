@@ -6,6 +6,7 @@ library(tibble)
 
 # Load utilities
 source("src/1. data preprocessing/training datasets/data_loader.R")
+source("src/4. fold changes/fold_changes.R")
 
 # Configuration
 DOUBLETS <- c(3, 4, 6, 12, 15, 21, 22, 24, 26, 27, 60)
@@ -27,11 +28,24 @@ table_s1 <- select_representative_samples(datasets$table_s1)
 annots_list <- datasets$annots_list
 hsa01100_genes <- datasets$hsa01100_genes
 
+
 # Datasets from Leader et al. 2021
-ds_matrix <- lung_ldm$dataset$ds[[1]]
+raw_umitab <- lung_ldm$dataset$umitab
 cell_metadata <- prepare_cell_metadata(lung_ldm, table_s1, DOUBLETS)
-umitab_filtered <- filter_umitab(ds_matrix, cell_metadata)
+umitab_filtered <- filter_umitab(raw_umitab, cell_metadata)
 cell_metadata_final <- cell_metadata %>% filter(cell_ID %in% colnames(umitab_filtered))
+
+# Remove large object from memory after extraction
+rm(lung_ldm)
+gc()
+
+# Remove raw_umitab if not needed later
+rm(raw_umitab)
+gc()
+
+# Remove cell_metadata if not needed later
+rm(cell_metadata)
+gc()
 
 
 # Transform sparse UMI matrix to long format aggregated at cell type level
@@ -45,6 +59,9 @@ aggregate_umitab_to_long <- function(umitab, cell_metadata) {
   # Map indices to names
   umitab_triplet$gene <- rownames(umitab)[umitab_triplet$gene_idx]
   umitab_triplet$cell_ID <- colnames(umitab)[umitab_triplet$cell_idx]
+  
+  # Convert to tibble for memory efficiency
+  umitab_triplet <- as_tibble(umitab_triplet)
   
   # Join with metadata and aggregate
   message("Aggregating counts by sample, cell type, gene.")
@@ -90,7 +107,7 @@ apply_celltype_normalization <- function(long_data) {
 
 # Filter genes by type
 filter_genes_by_type <- function(all_genes, gene_type) {
-  metabolic_genes <- hsa01100_genes$SYMBOL[hsa01100_genes$SYMBOL %in% all_genes]
+  metabolic_genes <- hsa01100_genes$Symbol[hsa01100_genes$Symbol %in% all_genes]
   
   if (gene_type == "metabolic") {
     return(metabolic_genes)
@@ -224,6 +241,47 @@ apply_cp_median_normalization <- function(umitab_subset, cell_metadata_subset) {
 }
 
 
+
+# CP10K normalization function for raw umitab data (sparse matrix aware)
+apply_cp10k_normalization <- function(umitab_matrix) {
+  message("Applying CP10K normalization to raw umitab data.")
+  
+  # Calculate total counts per cell
+  total_counts_per_cell <- Matrix::colSums(umitab_matrix)
+  
+  # Set scaling factor to 10,000 (CP10K)
+  scaling_factor <- 10000
+  
+  # Avoid division by zero
+  total_counts_per_cell[total_counts_per_cell == 0] <- 1
+  
+  # Create a diagonal matrix for scaling
+  scaling_diag <- Matrix::Diagonal(x = scaling_factor / total_counts_per_cell)
+  
+  # Multiply umitab_matrix by the diagonal scaling matrix
+  cp10k_matrix <- umitab_matrix %*% scaling_diag
+  
+  # Set cells with originally zero total counts back to zero
+  cols_to_zero <- which(Matrix::colSums(umitab_matrix) == 0)
+  if (length(cols_to_zero) > 0) {
+    cp10k_matrix[, cols_to_zero] <- 0
+  }
+  
+  # Handle any remaining invalid values
+  cp10k_matrix[is.na(cp10k_matrix) | is.infinite(cp10k_matrix)] <- 0
+  
+  # Ensure row and column names are preserved
+  rownames(cp10k_matrix) <- rownames(umitab_matrix)
+  colnames(cp10k_matrix) <- colnames(umitab_matrix)
+  
+  return(cp10k_matrix)
+}
+
+
+# Calculate fold changes for normalized data
+
+
+
 # Global normalization approach
 run_global_approach <- function(aggregated_data) {
   message("\n GLOBAL NORMALIZATION APPROACH")
@@ -250,6 +308,9 @@ run_global_approach <- function(aggregated_data) {
       # Filter the subset_data based on the filtered gene set
       gene_filtered_data <- subset_data %>% filter(gene %in% filtered_genes)
       
+      # Calculate fold changes before log transformation
+      calculate_fold_changes_for_normalization(gene_filtered_data, table_s1, annots_list, "ctnorm_global", cell_type, gene_type)
+      
       # Log1p transformation
       log_data <- gene_filtered_data %>% mutate(log_normalized_count = log1p(normalized_count))
       
@@ -266,7 +327,9 @@ run_global_approach <- function(aggregated_data) {
     left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
     group_by(tissue, sample_ID, cluster_ID) %>%
     summarise(total_count = sum(normalized_count), .groups = 'drop')
-  write_csv(global_sum, file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_global.csv"))
+  global_sum_path <- file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_global.csv")
+  dir.create(dirname(global_sum_path), recursive = TRUE, showWarnings = FALSE)
+  write_csv(global_sum, global_sum_path)
 }
 
 
@@ -298,12 +361,15 @@ run_relative_approach <- function(umitab_filtered, cell_metadata_final) {
 
       # Apply the subset filter
       subset_umitab <- umitab_filtered[filtered_genes, cells_to_keep_in_subset, drop = FALSE]
-      
+
       # Apply Custom CP10K normalization 
       cp_median_data <- apply_cp_median_normalization(subset_umitab, subset_cell_metadata)
 
       # Apply cell type normalization
       relative_ctnorm_data <- apply_celltype_normalization(cp_median_data)
+      
+      # Calculate fold changes before log transformation
+      calculate_fold_changes_for_normalization(relative_ctnorm_data, table_s1, annots_list, "ctnorm_relative", cell_type, gene_type)
       
       # Log1p transformation
       log_data <- relative_ctnorm_data %>% mutate(log_normalized_count = log1p(normalized_count))
@@ -321,7 +387,9 @@ run_relative_approach <- function(umitab_filtered, cell_metadata_final) {
     left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
     group_by(tissue, sample_ID, cluster_ID) %>%
     summarise(total_count = sum(normalized_count), .groups = 'drop')
-  write_csv(rel_sum, file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_relative.csv"))
+  rel_sum_path <- file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_relative.csv")
+  dir.create(dirname(rel_sum_path), recursive = TRUE, showWarnings = FALSE)
+  write_csv(rel_sum, rel_sum_path)
 }
 
 
@@ -349,6 +417,9 @@ run_read_depth_approach <- function(aggregated_data) {
       # Rename count column to normalized_count for consistency with downstream functions
       read_depth_data <- gene_filtered_data %>% 
         rename(normalized_count = count)
+      
+      # Calculate fold changes before log transformation
+      calculate_fold_changes_for_normalization(read_depth_data, table_s1, annots_list, "read_depth", cell_type, gene_type)
         
       # Log1p transformation
       log_data <- read_depth_data %>% mutate(log_normalized_count = log1p(normalized_count))
@@ -366,19 +437,23 @@ run_read_depth_approach <- function(aggregated_data) {
     left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
     group_by(tissue, sample_ID, cluster_ID) %>%
     summarise(total_count = sum(count), .groups = 'drop')
-  write_csv(read_depth_sum, file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_read_depth.csv"))
+  read_depth_sum_path <- file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_read_depth.csv")
+  dir.create(dirname(read_depth_sum_path), recursive = TRUE, showWarnings = FALSE)
+  write_csv(read_depth_sum, read_depth_sum_path)
 }
 
 
-# Convert downsampled data to aggregated format for global and read_depth normalization
-message("Converting downsampled data to aggregated format.")
-aggregated_data <- aggregate_umitab_to_long(umitab_filtered, cell_metadata_final)
+# Apply CP10K normalization to the filtered umitab data for global and read depth approaches
+cp10k_normalized_umitab <- apply_cp10k_normalization(umitab_filtered)
+
+# Convert CP10K normalized data to aggregated format
+aggregated_data <- aggregate_umitab_to_long(cp10k_normalized_umitab, cell_metadata_final)
 
 # Run global approach
 run_global_approach(aggregated_data)
 
 # Run relative approach
-run_relative_approach(umitab_filtered, cell_metadata_final)
+run_relative_approach(cp10k_normalized_umitab, cell_metadata_final)
 
 # Run read depth normalization approach
 run_read_depth_approach(aggregated_data)
@@ -387,100 +462,7 @@ message("\n Preprocessing pipeline completed.")
 
 
 # THIS IS OPTIONAL FOR FIGURE 1CDE
+# source("src/1. data preprocessing/metabolic_props_normalization/metabolic_proportions.R")
 
-# Calculate metabolic gene proportions per sample and cell type at three normalization stages
-calculate_metabolic_proportions <- function(ds_matrix, cell_metadata, hsa01100_genes) {
-  message("Calculating metabolic proportions for raw, global, and relative normalization stages.")
-
-  metabolic_genes <- intersect(hsa01100_genes$SYMBOL, rownames(ds_matrix))
-  results <- list()
-  sample_ids <- unique(cell_metadata$sample_ID)
-
-  # Load annotation and sample tables for cell type and tissue lookup
-  annots_list <- readr::read_csv("base/input_tables/annots_list.csv", show_col_types = FALSE)
-  table_s1 <- readr::read_csv("base/input_tables/table_s1_sample_table.csv", show_col_types = FALSE)
-
-  # Raw (aggregate to long format)
-  message("Aggregating raw counts to long format.")
-  raw_long <- aggregate_umitab_to_long(ds_matrix, cell_metadata)
-
-  # Global normalization
-  message("Applying global cell type normalization.")
-  global_norm_long <- apply_celltype_normalization(raw_long)
-
-  # Relative normalization
-  message("Filter on metabolic genes.")
-  ds_metabolic <- ds_matrix[metabolic_genes, , drop=FALSE]
-  message("Applying CP-median normalization.")
-  rel_cpmed_long <- apply_cp_median_normalization(ds_metabolic, cell_metadata)
-  message("Applying cell type normalization.")
-  rel_norm_long <- apply_celltype_normalization(rel_cpmed_long)
-
-  total_steps <- length(sample_ids)
-  step <- 0
-  for (sample in sample_ids) {
-    step <- step + 1
-    message(sprintf("[Progress: %d/%d] Processing sample_ID: %s", step, total_steps, sample))
-    sample_clusters <- unique(cell_metadata$cluster_ID[cell_metadata$sample_ID == sample])
-    for (cluster in sample_clusters) {
-      # Read depth
-      raw_sub <- raw_long %>% filter(sample_ID == sample, cluster_ID == cluster)
-      total_raw <- sum(raw_sub$count)
-      metabolic_raw <- sum(raw_sub$count[raw_sub$gene %in% metabolic_genes])
-      prop_raw <- ifelse(total_raw > 0, metabolic_raw / total_raw, NA)
-
-      # Global normalization
-      global_sub <- global_norm_long %>% filter(sample_ID == sample, cluster_ID == cluster)
-      total_global <- sum(global_sub$normalized_count)
-      metabolic_global <- sum(global_sub$normalized_count[global_sub$gene %in% metabolic_genes])
-      prop_global <- ifelse(total_global > 0, metabolic_global / total_global, NA)
-
-      # Relative normalization
-      rel_sub <- rel_norm_long %>% filter(sample_ID == sample, cluster_ID == cluster)
-      total_relative <- sum(rel_sub$normalized_count)
-      metabolic_relative <- total_relative
-      prop_relative <- ifelse(total_relative > 0, metabolic_relative / total_relative, NA)
-
-      # Lookup cell type and tissue
-      cell_type_row <- annots_list[annots_list$cluster == cluster, ]
-      if (nrow(cell_type_row) == 0) {
-        cell_type <- NA
-      } else if (!is.na(cell_type_row$sub_lineage) && cell_type_row$sub_lineage != "") {
-        cell_type <- cell_type_row$sub_lineage
-      } else {
-        cell_type <- cell_type_row$lineage
-      }
-      tissue <- table_s1$tissue[table_s1$sample_ID == sample]
-      if (length(tissue) == 0) tissue <- NA
-      # Combine cell type and cluster ID
-      celltype_cluster <- if (!is.na(cell_type) && !is.na(cluster)) paste(cell_type, cluster, sep = "_") else NA
-
-      results[[length(results) + 1]] <- data.frame(
-        sample_ID = sample,
-        cluster_ID = cluster,
-        cell_type = cell_type,
-        celltype_cluster = celltype_cluster,
-        tissue = tissue,
-        metabolic_prop_raw = prop_raw,
-        metabolic_prop_global = prop_global,
-        metabolic_prop_relative = prop_relative,
-        metabolic_counts_raw = metabolic_raw,
-        total_counts_raw = total_raw,
-        metabolic_counts_global = metabolic_global,
-        total_counts_global = total_global,
-        metabolic_counts_relative = metabolic_relative,
-        total_counts_relative = total_relative
-      )
-    }
-  }
-  out <- do.call(rbind, results)
-  output_path <- file.path("output", "0. intermediates", "metabolic_proportions_by_normalization.csv")
-  dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
-  write_csv(out, output_path)
-  message("Metabolic proportions written to: ", output_path)
-  return(out)
-}
-
-
-# Calculate metabolic proportions efficiently
-#calculate_metabolic_proportions(ds_matrix, cell_metadata, hsa01100_genes)
+# Calculate metabolic proportions
+# calculate_metabolic_proportions(ds_matrix, cell_metadata, hsa01100_genes)

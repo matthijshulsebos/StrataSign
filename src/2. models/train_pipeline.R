@@ -32,11 +32,10 @@ extract_active_items <- function(config_list, item_name) {
 
 # Load datasets from dataset directory
 load_dataset_csvs <- function(x_train_path, x_test_path, y_train_path, y_test_path) {
-  X_train_df <- read.csv(x_train_path, check.names = FALSE) 
-  X_test_df <- read.csv(x_test_path, check.names = FALSE) 
-  y_train_df <- read.csv(y_train_path) 
-  y_test_df <- read.csv(y_test_path)   
-  
+  X_train_df <- data.table::fread(x_train_path, check.names = FALSE, data.table = FALSE)
+  X_test_df  <- data.table::fread(x_test_path, check.names = FALSE, data.table = FALSE)
+  y_train_df <- data.table::fread(y_train_path, data.table = FALSE)
+  y_test_df  <- data.table::fread(y_test_path, data.table = FALSE)
   return(list(X_train_df = X_train_df, X_test_df = X_test_df, y_train_df = y_train_df, y_test_df = y_test_df))
 }
 
@@ -199,6 +198,7 @@ run_training_pipeline <- function(config_obj) {
     }
     
     # Load datasets
+    message("Loading datasets for current combination.")
     datasets <- load_dataset_csvs(X_train_file, X_test_file, y_train_file, y_test_file)
 
     message("Loaded all datasets for current combination.")

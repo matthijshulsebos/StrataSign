@@ -88,7 +88,6 @@ train_spls_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   tuning_grid_spls <- expand.grid(
     K = c(2, 3, 5),
     eta = c(0.3, 0.5, 0.7),
-    kappa = c(0.3, 0.5, 0.7),
     stringsAsFactors = FALSE
   )
 
@@ -120,11 +119,10 @@ train_spls_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
           X_train_cv, y_train_cv,
           K = current_params$K,
           eta = current_params$eta,
-          kappa = current_params$kappa,
           scale.x = TRUE,
           scale.y = TRUE,
           select = "pls2",
-          fit = "simpls"
+          fit = "kernelpls"
         )
         
         # Make predictions and calculate error
@@ -155,7 +153,6 @@ train_spls_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
       y_train_numeric,
       K = best_params$K,
       eta = best_params$eta,
-      kappa = best_params$kappa,
       scale.x = TRUE,
       scale.y = TRUE,
       select = "pls2", 
@@ -184,7 +181,7 @@ train_spls_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
   
   # Extract feature importance from final regression coefficients
   if (!is.null(final_model$betahat) && is.matrix(final_model$betahat)) {
-    importance_values <- abs(final_model$betahat[, 1])
+    importance_values <- final_model$betahat[, 1]
     names(importance_values) <- colnames(X_train_matrix)
     
     # Overwrite 0 feature importance for modeled features
@@ -197,7 +194,7 @@ train_spls_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
     stop("Betahat not available.")
   }
   
-  # Sort by importance
+  # Sort by absolute value of importance
   feature_importance_df <- feature_importance_df %>%
     arrange(desc(abs(Value)))
 
