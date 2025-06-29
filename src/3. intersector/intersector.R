@@ -9,44 +9,16 @@ library(purrr)
 # Source utility functions
 source("src/0. utils/feature_name_utils.R")
 
-# Create empty final table
-create_empty_final_table <- function(model_names) {
-  score_cols <- paste0(model_names, "_score")
-  cols <- c("feature_id","gene","sublineage","meta_score","n_models_occur","fold_change", score_cols)
-  
-  df <- tibble()
-  for (col in cols) {
-    if (col %in% c("fold_change")) {
-      df[[col]] <- numeric(0)
-    } else {
-      df[[col]] <- numeric(0)
-    }
-  }
-
-  return(df[cols])
-}
-
-# Color map for sublineages to file
-create_color_map <- function(items, output_path) {
-  dir_create(dirname(output_path), recurse = TRUE)
-  qual_col_pals <- brewer.pal.info[brewer.pal.info$category=='qual',]
-  col_vector <- unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
-  if (length(col_vector)==0) col_vector <- c("#E41A1C","#377EB8","#4DAF4A","#984EA3","#FF7F00","#FFFF33","#A65628","#F781BF")
-  col_vector <- rep(col_vector, length.out = length(items))
-  color_map  <- setNames(col_vector[seq_along(items)], items)
-
-  saveRDS(color_map, file=output_path)
-  message(glue("Color map for {length(items)} items saved to: {output_path}"))
-
-  return(color_map)
-}
 
 # Load one file
 load_and_extract_features <- function(file_path, model_name) {
   df <- tryCatch(read_csv(file_path, show_col_types=FALSE), error = function(e){
     message("Error reading ",file_path,": ",e$message); NULL
   })
-  if (is.null(df) || !"Feature"%in%names(df)||!"Value"%in%names(df)||nrow(df)==0) return(NULL)
+
+  if (is.null(df) || !"Feature"%in%names(df)||!"Value"%in%names(df)||nrow(df)==0) {
+    return(NULL)
+  }
   
   df %>%
     transmute(
@@ -62,24 +34,24 @@ load_and_extract_features <- function(file_path, model_name) {
 # Find and filter files
 get_filtered_feature_files <- function(models_dir, target_gene_type, target_cell_type) {
   
-  # Look for cell type directories (e.g., all_clusters, macrophages)
+  # Look for cell type directory
   cell_type_dirs <- dir_ls(models_dir, type = "directory")
   
   if (length(cell_type_dirs) == 0) {
     return(list())
   }
 
-  all_found_files_list <- list() # Initialize an empty list to collect file info
+  all_found_files_list <- list()
 
   for (cell_type_dir_path in cell_type_dirs) {
-    cell_type_name <- path_file(cell_type_dir_path) # Get 'all_clusters' from '.../cp10k/all_clusters'
+    cell_type_name <- path_file(cell_type_dir_path)
     
     # Skip if this is not the target cell type
     if (cell_type_name != target_cell_type) {
       next
     }
     
-    # Look for gene type directories (e.g., metabolic, nonmetabolic, random)
+    # Look for gene type directory
     gene_type_dirs <- dir_ls(cell_type_dir_path, type = "directory")
     
     for (gene_type_dir_path in gene_type_dirs) {
@@ -97,11 +69,10 @@ get_filtered_feature_files <- function(models_dir, target_gene_type, target_cell
         model_name_from_path <- path_file(model_dir_path)
         
         if (dir_exists(model_dir_path)) {
-          # Define the glob pattern and its regex equivalent
+          # Create regex from glob pattern
           file_name_glob_pattern <- "feature_importance*.csv"
-          regex_pattern_for_list_files <- utils::glob2rx(file_name_glob_pattern)
+          regex_pattern_for_list_files <- glob2rx(file_name_glob_pattern)
           
-          # Use base R's list.files()
           files_in_model_dir <- list.files(path = model_dir_path, 
                                             pattern = regex_pattern_for_list_files, 
                                             full.names = TRUE, 
@@ -125,75 +96,90 @@ get_filtered_feature_files <- function(models_dir, target_gene_type, target_cell
 }
 
 
-# Extract all into one data frame
-extract_all_features <- function(file_model_list) {
-  file_model_list %>% 
-    map(~ load_and_extract_features(.x$file_path, .x$model_name)) %>% 
-    compact() %>% 
-    bind_rows()
-}
-
-
-# Compute model density (if >100 non zero features)
-compute_model_density <- function(all_features, model_names, eps=1e-10) {
-  map_lgl(model_names, function(m) {
-    df <- filter(all_features, model_type==m)
-    sum(df$abs_value>eps, na.rm=TRUE) > 100
-  }) %>% set_names(model_names)
-}
-
-
 # Scale single model score table based on rank
-scale_scores_for_model <- function(df, is_dense, threshold=0.7, eps=1e-10) {
-  base_name <- paste0(unique(df$model_type), "_score")
-  df0 <- select(df, feature_id, gene, sublineage, abs_value) %>%
-         mutate(!!base_name := 0)
-  cand <- filter(df0, abs_value>eps)
-  if (nrow(cand)>0) {
-    to_scale <- if (is_dense) {
-      ord <- arrange(cand, desc(abs_value))
-      cum <- cumsum(ord$abs_value)/sum(ord$abs_value)
-      sel <- which(cum<=threshold)
-      if (length(sel)==0) sel <- 1
-      slice(ord, sel)
-    } else cand
-    
-    # Rank-based scaling: scale between 0.5 and 1.0 based on rank position
-    n_features <- nrow(to_scale)
-    if (n_features == 1) {
-      scaled <- rep(0.75, n_features)
-    } else {
-      # Sort by abs_value descending to get ranks
-      to_scale <- arrange(to_scale, desc(abs_value))
-      ranks <- seq_len(n_features)
-      # Scale ranks 1 best and 0.5 worst
-      scaled <- 1.0 - 0.5 * (ranks - 1) / (n_features - 1)
-    }
-    
-    upd <- tibble(feature_id=to_scale$feature_id, !!base_name:=scaled)
-    df0 <- left_join(df0, upd, by="feature_id", suffix=c(".old",".new")) %>%
-           mutate(!!base_name:=coalesce(.data[[paste0(base_name,".new")]], .data[[paste0(base_name,".old")]])) %>%
-           select(-ends_with(".old"), -ends_with(".new"))
+scale_scores_for_model <- function(df, model_name, is_dense, threshold = 0.7) {
+  score_col <- paste0(model_name, "_score")
+
+  # Handle empty input dataframe by returning a correctly structured empty tibble
+  if (nrow(df) == 0) {
+    return(tibble(
+      feature_id = character(),
+      gene = character(),
+      sublineage = character(),
+      !!score_col := numeric()
+    ))
   }
-  df0 %>% select(feature_id, gene, sublineage, !!base_name)
-}
 
+  # Base data for processing
+  df_out <- df %>%
+    select(feature_id, gene, sublineage, abs_value)
 
-# Build model score table
-build_model_score_tables <- function(all_feat, density_map) {
-  models <- names(density_map)
-  map(models, function(m) {
-    dfm <- filter(all_feat, model_type==m)
-    scale_scores_for_model(dfm, density_map[[m]])
-  })
-}
-
-
-# Merge and compute meta score with fold change integration
-merge_and_score <- function(score_tables, fold_changes_data = NULL) {
-  merged <- reduce(score_tables, full_join, by=c("feature_id","gene","sublineage"))
-  score_cols <- grep("_score$", names(merged), value=TRUE)
+  # Only consider features with nonzero importance
+  nonzero_features <- df_out %>% filter(abs_value > 0)
   
+  # If no features have importance, return with all scores as 0
+  if (nrow(nonzero_features) == 0) {
+    return(df_out %>% 
+             select(feature_id, gene, sublineage) %>% 
+             mutate(!!score_col := 0))
+  }
+
+  # For dense models keep only features up to the cumulative threshold
+  if (is_dense) {
+    nonzero_features <- nonzero_features %>% arrange(desc(abs_value))
+    cum_importance <- cumsum(nonzero_features$abs_value) / sum(nonzero_features$abs_value)
+    selected_idx <- which(cum_importance <= threshold)
+    if (length(selected_idx) == 0) selected_idx <- 1
+    features_to_scale <- nonzero_features[selected_idx, ]
+  } else {
+    features_to_scale <- nonzero_features
+  }
+
+  # Assign scaled scores
+  n <- nrow(features_to_scale)
+  if (n == 1) {
+    scaled_scores <- 1
+    ranks <- 1
+  } else {
+    features_to_scale <- features_to_scale %>% arrange(desc(abs_value))
+    ranks <- seq_len(n)
+    scaled_scores <- 1.0 - 0.5 * (ranks - 1) / (n - 1)
+  }
+
+  # Create a tibble with scores for selected features
+  score_update <- tibble(
+    feature_id = features_to_scale$feature_id, 
+    !!score_col := scaled_scores
+  )
+
+  # Join scores to the base data, replace NA with 0, and select final columns
+  df_out %>%
+    select(feature_id, gene, sublineage) %>%
+    left_join(score_update, by = "feature_id") %>%
+    mutate(!!score_col := replace_na(.data[[score_col]], 0))
+}
+
+
+# Merge and compute meta score
+merge_and_score <- function(score_tables, all_models, fold_changes_data = NULL) {
+  # Get expected score column names from all models that were supposed to be processed
+  expected_score_cols <- paste0(all_models, "_score")
+
+  # Perform the full join on all score tables
+  merged <- reduce(score_tables, full_join, by = c("feature_id", "gene", "sublineage"))
+
+  # Identify which score columns are actually present after the merge
+  current_score_cols <- grep("_score$", names(merged), value = TRUE)
+  
+  # Identify and add any missing score columns, initializing them with 0
+  missing_cols <- setdiff(expected_score_cols, current_score_cols)
+  if (length(missing_cols) > 0) {
+    # Dynamically create a list of new columns to add, with 0 as the default value
+    new_cols_to_add <- setNames(rep(list(0), length(missing_cols)), missing_cols)
+    merged <- merged %>%
+      add_column(!!!new_cols_to_add)
+  }
+
   # Add fold change information
   if (!is.null(fold_changes_data)) {
     merged <- merged %>%
@@ -202,74 +188,107 @@ merge_and_score <- function(score_tables, fold_changes_data = NULL) {
       rename(fold_change = Value)
   } else {
     merged <- merged %>%
-      mutate(fold_change = NA_real_)
+      mutate(fold_change = NA)
   }
   
-  merged %>%
-    mutate(across(all_of(score_cols), ~coalesce(.x,0))) %>%
-    mutate(
-      meta_score    = rowSums(select(., all_of(score_cols))),
-      n_models_occur= rowSums(select(., all_of(score_cols))>0)
-    )
+  # Replace NA scores with 0 for all model score columns
+  merged <- merged %>%
+    mutate(across(all_of(expected_score_cols), ~replace_na(.x, 0)))
+
+  # Calculate meta score as sum of all model scores
+  merged <- merged %>%
+    mutate(meta_score = rowSums(select(., all_of(expected_score_cols))))
+
+  # Count in how many models the feature was important
+  merged <- merged %>%
+    mutate(n_models_occur = rowSums(select(., all_of(expected_score_cols)) > 0))
+
+  merged
 }
 
 
 # Filter meta scores and write to file
 filter_and_write <- function(df, min_models, all_models, out_dir) {
-  df_f <- filter(df, n_models_occur>=min_models) %>% arrange(desc(meta_score))
-  if (nrow(df_f)==0) {
-    message("No features met min_models_occurrence of ",min_models)
-    empty <- create_empty_final_table(all_models)
-    write_csv(empty, file.path(out_dir,"meta_scores.csv"))
-    return(empty)
+  # Filter features by minimum model occurrence and sort by meta score
+  filtered <- df %>%
+    filter(n_models_occur >= min_models) %>%
+    arrange(desc(meta_score))
+
+  # Prepare score column names
+  score_cols <- paste0(all_models, "_score")
+  all_cols <- c("feature_id", "gene", "sublineage", "meta_score", "n_models_occur", "fold_change", sort(score_cols))
+
+  # If no features pass the filter stop the intersector
+  if (nrow(filtered) == 0) {
+    message(sprintf("No features met min_models_occurrence of %s.", min_models))
+    return(NULL)
   }
-  score_cols <- grep("_score$", names(df_f), value=TRUE) 
-  cols <- c("feature_id","gene","sublineage","meta_score","n_models_occur","fold_change", sort(score_cols))
-  write_csv(select(df_f, all_of(cols)), file.path(out_dir,"meta_scores.csv"))
-  df_f[cols]
+
+  # Write filtered results to CSV and return the filtered tibble
+  write_csv(select(filtered, all_of(all_cols)), file.path(out_dir, "meta_scores.csv"))
+  filtered[all_cols]
 }
 
 
 # Main intersector function
-find_feature_intersection <- function(models_dir, output_dir, min_models_occurrence, cell_type_filter_val, gene_type_filter_val, type = NULL) {
-  dir_create(output_dir, recurse=TRUE)
+find_feature_intersection <- function(models_dir, output_dir, min_models_occurrence,cell_type_filter_val, gene_type_filter_val, type = NULL) {
+  # Ensure output directory exists
+  dir_create(output_dir, recurse = TRUE)
 
-  # Pass target_gene_type and target_cell_type to the updated function
-  fm_list <- get_filtered_feature_files(models_dir, gene_type_filter_val, cell_type_filter_val)
-  
-  if (length(fm_list)==0) {
-    message("No files for gene=",gene_type_filter_val," cell=",cell_type_filter_val)
+  # Find all relevant feature files for this cell/gene type
+  file_list <- get_filtered_feature_files(models_dir, gene_type_filter_val, cell_type_filter_val)
+  if (length(file_list) == 0) {
+    message(sprintf("No files for gene=%s cell=%s", gene_type_filter_val, cell_type_filter_val))
     return(NULL)
   }
-  all_feat <- extract_all_features(fm_list)
-  
-  models   <- sort(unique(all_feat$model_type))
 
-  if (nrow(all_feat)==0) {
-    empty <- create_empty_final_table(models)
-    write_csv(empty, file.path(output_dir,"meta_scores.csv"))
-    return(empty)
+  # Get unique model names directly from the file list, ensuring all models are accounted for
+  models <- file_list %>%
+    map_chr(~ .x$model_name) %>%
+    unique() %>%
+    sort()
+
+  # Load and combine all features
+  all_features <- file_list %>%
+    map(~ load_and_extract_features(.x$file_path, .x$model_name)) %>%
+    compact() %>%
+    bind_rows()
+  if (nrow(all_features) == 0) {
+    message("No features found after loading files.")
+    # Even if no features are found, we may need to create an empty meta_scores file
+    # with the correct columns if downstream processing depends on it.
+    # For now, we return NULL as before.
+    return(NULL)
   }
 
-  # Find the corresponding fold_changes.csv file for this combination
-  fold_changes_path <- NULL
-  if (!is.null(type)) {
-    # Try to find the fold_changes.csv file in the same structure as the model files
-    fold_changes_candidate <- file.path("output", "4. fold changes", type, cell_type_filter_val, gene_type_filter_val, "fold_changes.csv")
-    if (file.exists(fold_changes_candidate)) {
-      fold_changes_path <- fold_changes_candidate
-    }
-  }
-  fold_changes_data <- NULL
-  if (!is.null(fold_changes_path)) {
-    fold_changes_data <- tryCatch(read_csv(fold_changes_path, show_col_types = FALSE), error = function(e) NULL)
-  }
+  # Load fold change data
+  fold_changes_path <- file.path(
+    "output", "4. fold changes", type,
+    cell_type_filter_val, gene_type_filter_val,
+    "fold_changes.csv"
+  )
+  fold_changes_data <- tryCatch(
+    read_csv(fold_changes_path, show_col_types = FALSE),
+    error = function(e) stop(sprintf("Error reading fold change file: %s", e$message))
+  )
 
-  density_map <- compute_model_density(all_feat, models)
-  score_tables<- build_model_score_tables(all_feat, density_map)
-  merged <- merge_and_score(score_tables, fold_changes_data)
+  # Determine which models are dense
+  density_map <- setNames(
+    vapply(models, function(m) sum(all_features$abs_value[all_features$model_type == m] > 0, na.rm = TRUE) > 100, logical(1)),
+    models
+  )
+
+  # Scale feature scores for each model
+  score_tables <- map(models, function(m) {
+    model_df <- filter(all_features, model_type == m)
+    scale_scores_for_model(model_df, m, density_map[[m]])
+  })
+
+  # Merge model scores and fold changes
+  merged <- merge_and_score(score_tables, models, fold_changes_data)
+
+  # Filter and write results
   result <- filter_and_write(merged, min_models_occurrence, models, output_dir)
-
   return(result)
 }
 
@@ -280,11 +299,11 @@ process_dataset_cell_gene_combination <- function(type, cell_type, gene_type, ba
   output_dir <- file.path(base_output_dir, type, cell_type, gene_type)
   
   if (!dir.exists(models_dir)) {
-    warning(glue("Models directory not found: {models_dir}."))
+    warning(sprintf("Models directory not found: %s.", models_dir))
     return(NULL)
   }
   
-  message(glue("Processing dataset type: {type}, cell type: {cell_type}, gene type: {gene_type}"))
+  message(sprintf("Processing dataset type: %s, cell type: %s, gene type: %s", type, cell_type, gene_type))
   result <- find_feature_intersection(
     models_dir = models_dir,
     output_dir = output_dir,
@@ -295,7 +314,7 @@ process_dataset_cell_gene_combination <- function(type, cell_type, gene_type, ba
   )
   
   if (is.null(result) || nrow(result) == 0) {
-    message(glue("No results for dataset type: {type}, cell type: {cell_type}, gene type: {gene_type}"))
+    message(sprintf("No results for dataset type: %s, cell type: %s, gene type: %s.", type, cell_type, gene_type))
     return(NULL)
   }
   
@@ -304,7 +323,8 @@ process_dataset_cell_gene_combination <- function(type, cell_type, gene_type, ba
 
 
 # Generate sublineage color map
-generate_sublineage_color_map <- function(meta_score_files, output_path) {
+generate_and_save_sublineage_color_map <- function(meta_score_files, output_path) {
+  # Unique sublineages from meta score files
   sublineages <- meta_score_files %>%
     keep(file.exists) %>%
     map_dfr(~ read_csv(.x, show_col_types = FALSE) %>% select(sublineage)) %>%
@@ -312,14 +332,20 @@ generate_sublineage_color_map <- function(meta_score_files, output_path) {
     unique() %>%
     sort() %>%
     discard(is.na)
-  
-  if (length(sublineages) > 0) {
-    create_color_map(sublineages, output_path)
-    message(glue("Sublineage color map created for {length(sublineages)} unique sublineages."))
-  } else {
-    create_color_map(character(0), output_path)
-    message("No unique sublineages found. Saved an empty color map.")
-  }
+
+  # Ensure the output directory exists
+  dir_create(dirname(output_path), recurse = TRUE)
+
+  # Get qualitative color palettes for categorical data
+  qual_col_pals <- brewer.pal.info[brewer.pal.info$category == 'qual', ]
+  col_vector <- unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+  col_vector <- rep(col_vector, length.out = length(sublineages))
+
+  # Assign a color to each sublineage
+  color_map <- setNames(col_vector[seq_along(sublineages)], sublineages)
+  saveRDS(color_map, file = output_path)
+
+  return(color_map)
 }
 
 
@@ -327,7 +353,7 @@ generate_sublineage_color_map <- function(meta_score_files, output_path) {
 run_intersector <- function(
   base_models_dir = "output/2. models",
   base_output_dir = "output/3. intersector",
-  min_models_param = 2,
+  min_models_param = 3,
   dataset_types_to_process = c("ctnorm_global", "ctnorm_relative", "read_depth"),
   cell_types_to_process = c("all_clusters", "macrophages", "lcam_hi", "lcam_lo", "lcam_both"),
   gene_types_to_process = c("metabolic", "nonmetabolic", "random"),
@@ -342,7 +368,7 @@ run_intersector <- function(
     pmap(~ process_dataset_cell_gene_combination(..1, ..2, ..3, base_models_dir, base_output_dir, min_models_param)) %>%
     compact()
   
-  generate_sublineage_color_map(meta_score_files, sublineage_color_map_path)
+  generate_and_save_sublineage_color_map(meta_score_files, sublineage_color_map_path)
   message("Finished intersector analysis.")
 }
 
