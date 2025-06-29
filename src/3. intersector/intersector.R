@@ -5,6 +5,7 @@ library(fs)
 library(RColorBrewer)
 library(glue)
 library(purrr)
+library(data.table)
 
 # Source utility functions
 source("src/0. utils/feature_name_utils.R")
@@ -12,8 +13,11 @@ source("src/0. utils/feature_name_utils.R")
 
 # Load one file
 load_and_extract_features <- function(file_path, model_name) {
-  df <- tryCatch(read_csv(file_path, show_col_types=FALSE), error = function(e){
-    message("Error reading ",file_path,": ",e$message); NULL
+  df <- tryCatch({
+    as_tibble(fread(file_path))
+  }, error = function(e){
+    message("Error reading ",file_path,": ",e$message)
+    NULL
   })
 
   if (is.null(df) || !"Feature"%in%names(df)||!"Value"%in%names(df)||nrow(df)==0) {
@@ -223,7 +227,6 @@ filter_and_write <- function(df, min_models, all_models, out_dir) {
     message(sprintf("No features met min_models_occurrence of %s.", min_models))
     return(NULL)
   }
-
   # Write filtered results to CSV and return the filtered tibble
   write_csv(select(filtered, all_of(all_cols)), file.path(out_dir, "meta_scores.csv"))
   filtered[all_cols]
@@ -260,17 +263,17 @@ find_feature_intersection <- function(models_dir, output_dir, min_models_occurre
     # For now, we return NULL as before.
     return(NULL)
   }
-
   # Load fold change data
   fold_changes_path <- file.path(
     "output", "4. fold changes", type,
     cell_type_filter_val, gene_type_filter_val,
     "fold_changes.csv"
   )
-  fold_changes_data <- tryCatch(
-    read_csv(fold_changes_path, show_col_types = FALSE),
-    error = function(e) stop(sprintf("Error reading fold change file: %s", e$message))
-  )
+  fold_changes_data <- tryCatch({
+    as_tibble(fread(fold_changes_path))
+  }, error = function(e) {
+    stop(sprintf("Error reading fold change file: %s", e$message))
+  })
 
   # Determine which models are dense
   density_map <- setNames(
@@ -327,7 +330,7 @@ generate_and_save_sublineage_color_map <- function(meta_score_files, output_path
   # Unique sublineages from meta score files
   sublineages <- meta_score_files %>%
     keep(file.exists) %>%
-    map_dfr(~ read_csv(.x, show_col_types = FALSE) %>% select(sublineage)) %>%
+    map_dfr(~ as_tibble(fread(.x)) %>% select(sublineage)) %>%
     pull(sublineage) %>%
     unique() %>%
     sort() %>%

@@ -73,55 +73,60 @@ train_xgboost_model <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
 
   # Define hyperparameter grid
   tuning_grid_xgb <- expand.grid(
-    nrounds = c(100),
-    max_depth = c(3, 6),
-    eta = c(0.1, 0.3),
+    nrounds = c(200, 300),
+    max_depth = c(6, 8, 10),
+    eta = c(0.05, 0.1),
     gamma = c(0),
-    colsample_bytree = c(0.8),
+    colsample_bytree = c(1.0),
     min_child_weight = c(1),
-    subsample = c(0.8)
+    subsample = c(1.0),
+    reg_alpha = c(0),
+    reg_lambda = c(0, 0.01)
   )
 
-  # Configure cv
-  control <- trainControl(
-    method = "cv",
-    number = 3,
-    classProbs = TRUE,
-    summaryFunction = twoClassSummary,
-    verboseIter = FALSE,
-    allowParallel = TRUE
-  )
-
-  # Tune hyperparameters using caret
-  xgb_tune <- train(
-    x = X_train_matrix_for_caret,
-    y = y_train_factor_for_caret,
-    method = "xgbTree",
-    trControl = control,
-    tuneGrid = tuning_grid_xgb,
-    metric = "ROC",
-    verbose = FALSE
-  )
-
-  # Set best parameters for final model
-  best_params_list <- list(
-    max_depth = xgb_tune$bestTune$max_depth,
-    eta = xgb_tune$bestTune$eta,
-    gamma = xgb_tune$bestTune$gamma,
-    colsample_bytree = xgb_tune$bestTune$colsample_bytree,
-    min_child_weight = xgb_tune$bestTune$min_child_weight,
-    subsample = xgb_tune$bestTune$subsample,
-    objective = "binary:logistic",
-    eval_metric = "logloss"
-  )
+  best_auc <- -Inf
+  best_params <- NULL
+  best_nrounds <- NULL
   
-  # Train final XGBoost model
+  for (i in seq_len(nrow(tuning_grid_xgb))) {
+    params <- list(
+      objective = "binary:logistic",
+      eval_metric = "auc",
+      max_depth = tuning_grid_xgb$max_depth[i],
+      eta = tuning_grid_xgb$eta[i],
+      gamma = tuning_grid_xgb$gamma[i],
+      colsample_bytree = tuning_grid_xgb$colsample_bytree[i],
+      min_child_weight = tuning_grid_xgb$min_child_weight[i],
+      subsample = tuning_grid_xgb$subsample[i]
+    )
+    
+    # Cross validation
+    cv_results <- xgb.cv(
+      params = params,
+      data = dtrain_for_xgb,
+      nrounds = tuning_grid_xgb$nrounds[i],
+      nfold = 3,
+      early_stopping_rounds = 15,
+      verbose = FALSE,
+      showsd = FALSE
+    )
+    
+    # Get best iteration and score
+    best_iter <- cv_results$best_iteration
+    best_score <- cv_results$evaluation_log$test_auc_mean[best_iter]
+    
+    if (best_score > best_auc) {
+      best_auc <- best_score
+      best_params <- params
+      best_nrounds <- best_iter
+    }
+  }
+  
+  # Train final XGBoost model with best parameters
   final_xgb_model <- xgb.train(
-    params = best_params_list,
+    params = best_params,
     data = dtrain_for_xgb,
-    nrounds = xgb_tune$bestTune$nrounds,
-    watchlist = list(train = dtrain_for_xgb, test = dtest_for_xgb),
-    early_stopping_rounds = 10,
+    nrounds = best_nrounds,
     verbose = 0
   )
   
