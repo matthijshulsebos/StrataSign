@@ -278,8 +278,41 @@ apply_cp10k_normalization <- function(umitab_matrix) {
 }
 
 
-# Calculate fold changes for normalized data
-
+# Function to save total counts per cell type per sample
+save_celltype_total_counts <- function(normalized_data, normalization_method, cell_type_set, gene_type) {
+  # Calculate total counts per cell type per sample
+  total_counts <- normalized_data %>%
+    group_by(sample_ID, cluster_ID) %>%
+    summarise(total_count = sum(normalized_count), .groups = 'drop') %>%
+    left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
+    left_join(annots_list, by = c("cluster_ID" = "cluster")) %>%
+    mutate(
+      normalization_method = normalization_method,
+      cell_type_set = cell_type_set,
+      gene_type = gene_type,
+      cell_type_label = paste0(sub_lineage, "_", cluster_ID)
+    ) %>%
+    select(sample_ID, cluster_ID, cell_type_label, tissue, normalization_method, 
+           cell_type_set, gene_type, total_count) %>%
+    filter(!is.na(tissue))
+  
+  # Create output directory organized by gene type
+  output_dir <- file.path("output", "6. plots", "data", "cell_type_norm_counts", gene_type, cell_type_set)
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  # Create filename based on normalization method
+  filename <- paste0(normalization_method, "_total_counts.csv")
+  output_path <- file.path(output_dir, filename)
+  
+  # Append to existing file or create new one
+  if (file.exists(output_path)) {
+    existing_data <- read_csv(output_path, show_col_types = FALSE)
+    combined_data <- bind_rows(existing_data, total_counts)
+    write_csv(combined_data, output_path)
+  } else {
+    write_csv(total_counts, output_path)
+  }
+}
 
 
 # Global normalization approach
@@ -308,6 +341,9 @@ run_global_approach <- function(aggregated_data) {
       # Filter the subset_data based on the filtered gene set
       gene_filtered_data <- subset_data %>% filter(gene %in% filtered_genes)
       
+      # Save total counts before log transformation
+      save_celltype_total_counts(gene_filtered_data, "ctnorm_global", cell_type, gene_type)
+      
       # Calculate fold changes before log transformation
       calculate_fold_changes_for_normalization(gene_filtered_data, table_s1, annots_list, "ctnorm_global", cell_type, gene_type)
       
@@ -321,15 +357,6 @@ run_global_approach <- function(aggregated_data) {
       save_results(final_data, "ctnorm_global", cell_type, gene_type)
     }
   }
-  
-  # Write sum per cell type per sample
-  global_sum <- global_ctnorm_data %>%
-    left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
-    group_by(tissue, sample_ID, cluster_ID) %>%
-    summarise(total_count = sum(normalized_count), .groups = 'drop')
-  global_sum_path <- file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_global.csv")
-  dir.create(dirname(global_sum_path), recursive = TRUE, showWarnings = FALSE)
-  write_csv(global_sum, global_sum_path)
 }
 
 
@@ -368,6 +395,9 @@ run_relative_approach <- function(umitab_filtered, cell_metadata_final) {
       # Apply cell type normalization
       relative_ctnorm_data <- apply_celltype_normalization(cp_median_data)
       
+      # Save total counts before log transformation
+      save_celltype_total_counts(relative_ctnorm_data, "ctnorm_relative", cell_type, gene_type)
+      
       # Calculate fold changes before log transformation
       calculate_fold_changes_for_normalization(relative_ctnorm_data, table_s1, annots_list, "ctnorm_relative", cell_type, gene_type)
       
@@ -381,15 +411,6 @@ run_relative_approach <- function(umitab_filtered, cell_metadata_final) {
       save_results(final_data, "ctnorm_relative", cell_type, gene_type)
     }
   }
-  
-  # Write sum per cell type per sample
-  rel_sum <- relative_ctnorm_data %>%
-    left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
-    group_by(tissue, sample_ID, cluster_ID) %>%
-    summarise(total_count = sum(normalized_count), .groups = 'drop')
-  rel_sum_path <- file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_relative.csv")
-  dir.create(dirname(rel_sum_path), recursive = TRUE, showWarnings = FALSE)
-  write_csv(rel_sum, rel_sum_path)
 }
 
 
@@ -418,6 +439,9 @@ run_read_depth_approach <- function(aggregated_data) {
       read_depth_data <- gene_filtered_data %>% 
         rename(normalized_count = count)
       
+      # Save total counts before log transformation
+      save_celltype_total_counts(read_depth_data, "read_depth", cell_type, gene_type)
+      
       # Calculate fold changes before log transformation
       calculate_fold_changes_for_normalization(read_depth_data, table_s1, annots_list, "read_depth", cell_type, gene_type)
         
@@ -431,19 +455,10 @@ run_read_depth_approach <- function(aggregated_data) {
       save_results(final_data, "read_depth", cell_type, gene_type)
     }
   }
-  
-  # Write sum per cell type per sample
-  read_depth_sum <- aggregated_data %>%
-    left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
-    group_by(tissue, sample_ID, cluster_ID) %>%
-    summarise(total_count = sum(count), .groups = 'drop')
-  read_depth_sum_path <- file.path("output", "0. intermediates", "sum_counts_per_celltype_per_sample_read_depth.csv")
-  dir.create(dirname(read_depth_sum_path), recursive = TRUE, showWarnings = FALSE)
-  write_csv(read_depth_sum, read_depth_sum_path)
 }
 
 
-# Apply CP10K normalization to the filtered umitab data for global and read depth approaches
+# Apply CP10K normalization to the filtered umitab data
 cp10k_normalized_umitab <- apply_cp10k_normalization(umitab_filtered)
 
 # Convert CP10K normalized data to aggregated format
@@ -459,10 +474,3 @@ run_relative_approach(cp10k_normalized_umitab, cell_metadata_final)
 run_read_depth_approach(aggregated_data)
 
 message("\n Preprocessing pipeline completed.")
-
-
-# THIS IS OPTIONAL FOR FIGURE 1CDE
-# source("src/1. data preprocessing/metabolic_props_normalization/metabolic_proportions.R")
-
-# Calculate metabolic proportions
-# calculate_metabolic_proportions(ds_matrix, cell_metadata, hsa01100_genes)

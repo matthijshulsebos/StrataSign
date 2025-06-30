@@ -17,6 +17,7 @@ calculate_fold_changes_for_normalization <- function(normalized_data, table_s1, 
   all_clusters <- unique(data_with_tissue$cluster_ID)
   all_genes <- unique(data_with_tissue$gene)
 
+
   # Create a complete grid of gene, cluster_ID, and sample_ID for each tissue
   complete_data <- bind_rows(lapply(all_tissues, function(tissue_type) {
     expand.grid(
@@ -28,7 +29,7 @@ calculate_fold_changes_for_normalization <- function(normalized_data, table_s1, 
     )
   }))
 
-  # Join with normalized_data to fill in zeros for missing combinations
+  # Fill in zeros for missing combinations
   data_with_zeros <- complete_data %>%
     left_join(data_with_tissue %>% select(gene, cluster_ID, sample_ID, tissue, normalized_count),
               by = c("gene", "cluster_ID", "sample_ID", "tissue")) %>%
@@ -44,15 +45,15 @@ calculate_fold_changes_for_normalization <- function(normalized_data, table_s1, 
       .groups = 'drop'
     ) %>%
     pivot_wider(
+      # This creates names like mean_expr_Normal
       names_from = tissue,
       values_from = c(mean_expr, n_samples, n_nonzero),
       values_fill = 0
     )
 
   # Get tissue column names
-  tissue_cols <- all_tissues
-  normal_col <- if ("normal" %in% tissue_cols) "normal" else tissue_cols[1]
-  tumor_col <- if ("tumor" %in% tissue_cols) "tumor" else tissue_cols[2]
+  normal_col <- "Normal"
+  tumor_col <- "Tumor"
 
   # Calculate log2 fold changes with pseudocount of 0.0001
   fold_changes <- tissue_means %>%
@@ -82,6 +83,8 @@ calculate_fold_changes_for_normalization <- function(normalized_data, table_s1, 
   output_dir <- file.path("output", "4. fold changes", method_name, cell_type, gene_type)
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
+
+
   # Save main results with Feature and Value columns
   main_results <- fold_changes_with_features %>%
     select(Feature, Value)
@@ -90,7 +93,9 @@ calculate_fold_changes_for_normalization <- function(normalized_data, table_s1, 
 
   # Save detailed results with all information
   detailed_output_path <- file.path(output_dir, "detailed_fold_changes.csv")
-  write_csv(fold_changes_with_features, detailed_output_path)
+  detailed_results_lower <- fold_changes_with_features
+  names(detailed_results_lower) <- tolower(names(detailed_results_lower))
+  write_csv(detailed_results_lower, detailed_output_path)
 
   message(sprintf("Saved fold changes: %s", output_path))
 
