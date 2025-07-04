@@ -9,17 +9,17 @@ training_parameters:
   gene_type:
     metabolic: true
     nonmetabolic: true
-    random: false
+    random: true
 
   # Choose the types of cells to train on
   cell_type:
-    macrophages: false
-    lcam_hi: false
-    lcam_lo: false
-    lcam_both: false
+    macrophages: true
+    lcam_hi: true
+    lcam_lo: true
+    lcam_both: true
     all_clusters: true
-    has_10_in_50pct: false
-    has_10_in_70pct: false
+    has_10_in_50pct: true
+    has_10_in_70pct: true
 
   # Set which models to train
   models:
