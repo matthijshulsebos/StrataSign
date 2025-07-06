@@ -6,8 +6,8 @@ library(ggpubr)
 
 
 # Configuration
-output_figure_dir <- "output/6. plots/figure 2"
-output_plot_name <- "fig_2b_metabolic_proportion_per_celltype_boxplot.png"
+output_figure_dir <- "output/6. plots/figure 3"
+output_plot_name <- "fig_3b.png"
 
 # Load cp10k normalized umitab and metadata
 umitab_filtered <- readRDS("output/6. plots/data/cp10k/cp10k_normalized_umitab.rds")
@@ -98,13 +98,15 @@ p <- ggplot(patient_celltype_metabolic, aes(x = cell_type, y = metabolic_proport
     y = "Metabolic gene expression proportion",
     fill = "Tissue type"
   ) +
-  theme_minimal() +
+  theme_bw(base_family = "sans") +
   theme(
-    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10),
-    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10, color = "black"),
+    axis.text.y = element_text(size = 10, color = "black"),
     axis.title.x = element_blank(),
-    axis.title.y = element_text(size = 12),
-    legend.position = "none"
+    axis.title.y = element_text(size = 12, color = "black"),
+    legend.position = "none",
+    strip.text = element_text(color = "black", face = "bold"),
+    strip.background = element_rect(fill = "white", color = "black")
   ) +
   scale_fill_manual(values = c("Normal" = "#56B4E9", "Tumor" = "#E69F00")) +
   scale_y_continuous(labels = scales::percent_format(accuracy = 0.1))
@@ -129,7 +131,7 @@ legend_plot <- ggplot(patient_celltype_metabolic, aes(x = cell_type, y = metabol
 legend_grob <- get_legend(legend_plot)
 
 # Save the legend as a separate file
-legend_output_path <- file.path(output_figure_dir, "fig_2_shared_tissue_legend.png")
+legend_output_path <- file.path(output_figure_dir, "fig_3_shared_tissue_legend.png")
 ggsave(legend_output_path, legend_grob, width = 1, height = 0.8, dpi = 300)
 
-message("Completed writing figure 2B to file.")
+message("Completed writing figure 3B to file.")

@@ -6,7 +6,7 @@ library(viridis)
 library(tibble)
 
 output_figure_dir <- "output/6. plots/figure 1"
-output_plot_name <- "fig_1a_patient_celltype_proportion_oncoplot.png"
+output_plot_name <- "fig_1a.png"
 
 
 # Load the sample filtered CP10K cell metadata
@@ -93,25 +93,45 @@ complete_matrix <- expand_grid(
     )
   )
 
+
+# Sum cluster proportions per cell type for each patient and tissue
+# For missing tissues, set all cell type proportions to NA (excluded from stats and plot)
+# For present tissues, set missing cell types to 0 (included in stats and plot)
+celltype_patient_props <- complete_matrix %>%
+  mutate(proportion = ifelse(is_missing_tissue, NA, proportion)) %>%
+  group_by(patient_ID, tissue, cell_type) %>%
+  summarise(proportion = if (all(is.na(proportion))) NA_real_ else sum(proportion, na.rm = TRUE), .groups = 'drop')
+
+# Check that proportions for each patient/tissue sum to 1 (or very close)
+proportion_sums <- celltype_patient_props %>%
+  group_by(patient_ID, tissue) %>%
+  summarise(total_proportion = sum(proportion), .groups = 'drop')
+
+off_samples <- proportion_sums %>% filter(abs(total_proportion - 1) > 1e-6)
+if (nrow(off_samples) > 0) {
+  message("WARNING: Some patient/tissue combinations have proportions that do not sum to 1:")
+  print(off_samples, n = Inf)
+} else {
+  message("All patient/tissue combinations sum to 1 (within tolerance).")
+}
+
 # Get patient order based on subtype
 patient_order <- table_s1 %>%
   select(patient_ID, subtype = disease) %>%
   distinct() %>%
-  # Order by cancer subtype and patient id
   arrange(subtype, patient_ID) %>%
-  # Create simple sequential numbering
   mutate(patient_order_val = row_number())
 
 # Order cell types by average proportion in normal sample
-celltype_avg_normal <- complete_matrix %>%
+celltype_avg_normal <- celltype_patient_props %>%
   filter(tissue == "Normal") %>%
   group_by(cell_type) %>%
   summarise(avg_prop = mean(proportion, na.rm = TRUE), .groups = 'drop') %>%
   arrange(avg_prop)
 celltype_levels <- celltype_avg_normal$cell_type
 
-# Prepare data for complete heatmap
-plot_data_facet <- complete_matrix %>%
+# Prepare data for complete heatmap (now using summed cell type proportions)
+plot_data_facet <- celltype_patient_props %>%
   left_join(patient_order, by = "patient_ID") %>%
   mutate(
     patient_label = paste0("P", patient_ID),
@@ -123,7 +143,7 @@ plot_data_facet <- complete_matrix %>%
 
 # Complete heatmap
 p <- ggplot(plot_data_facet, aes(x = cell_type, y = patient_ID)) +
-  geom_tile(aes(fill = ifelse(is_missing_tissue, NA, sqrt(proportion))), color = "white", linewidth = 0.1) +
+  geom_tile(aes(fill = sqrt(proportion)), color = "white", linewidth = 0.1) +
   scale_fill_viridis_c(
     option = "plasma",
     na.value = "gray",
@@ -145,21 +165,40 @@ p <- ggplot(plot_data_facet, aes(x = cell_type, y = patient_ID)) +
     expand = c(0, 0)
   ) +
   coord_cartesian(clip = "off") +
-  theme_minimal(base_family = "sans") +
+  theme_bw(base_family = "sans") +
   theme(
-    axis.text.x.bottom = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10, family = "sans"),
-    axis.text.y = element_text(size = 10, family = "sans"),
+    axis.text.x.bottom = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10, family = "sans", color = "black"),
+    axis.text.y = element_text(size = 10, family = "sans", color = "black"),
     axis.title.x = element_blank(),
     axis.title.y = element_blank(),
     axis.ticks = element_blank(),
-    legend.title = element_text(size = 10, family = "sans"),
-    legend.text = element_text(size = 8, family = "sans"),
+    legend.title = element_text(size = 10, family = "sans", color = "black"),
+    legend.text = element_text(size = 8, family = "sans", color = "black"),
     panel.grid = element_blank(),
-    strip.text = element_text(size = 11, face = "plain", family = "sans"),
+    strip.text = element_text(size = 11, face = "plain", family = "sans", color = "black"),
     plot.margin = margin(t = 10, r = 5, b = 10, l = 30)
   )
 
 # Save the plot
 ggsave(output_plot_path, plot = p, width = 12, height = 6, dpi = 300, bg = "white", device = "png")
+
+# Aggregate proportions per cell type and tissue, calculate summary statistics
+celltype_tissue_stats <- celltype_patient_props %>%
+  group_by(cell_type, tissue) %>%
+  summarise(
+    n_patients = n_distinct(patient_ID),
+    mean_proportion = mean(proportion, na.rm = TRUE),
+    median_proportion = median(proportion, na.rm = TRUE),
+    sd_proportion = sd(proportion, na.rm = TRUE),
+    min_proportion = min(proportion, na.rm = TRUE),
+    max_proportion = max(proportion, na.rm = TRUE),
+    q25_proportion = quantile(proportion, 0.25, na.rm = TRUE),
+    q75_proportion = quantile(proportion, 0.75, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+
+# Write summary statistics to CSV
+write_csv(celltype_tissue_stats, file.path(output_figure_dir, "fig_1a_stats.csv"))
 
 message("Completed writing figure 1 oncoplot to file.")

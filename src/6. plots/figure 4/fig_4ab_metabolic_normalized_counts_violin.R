@@ -6,7 +6,7 @@ library(ggpubr)
 # Set basic variables
 cell_type_set <- "all_clusters"
 gene_type <- "metabolic"
-output_figure_dir <- "output/6. plots/figure 3"
+output_figure_dir <- "output/6. plots/figure 4"
 
 # Counts data path
 base_dir <- file.path("output", "6. plots", "data", "cell_type_norm_counts", gene_type, cell_type_set)
@@ -72,16 +72,18 @@ create_violin_plot <- function(data, title, output_name, reference_line_value = 
       x = "",
       y = "Log10(total metabolic gene counts + 1)"
     ) +
-    theme_minimal() +
+    theme_bw(base_family = "sans") +
     theme(
-      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10),
-      axis.text.y = element_text(size = 10),
+      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 10, color = "black"),
+      axis.text.y = element_text(size = 10, color = "black"),
       axis.title.x = element_blank(),
-      axis.title.y = element_text(size = 12),
+      axis.title.y = element_text(size = 12, color = "black"),
       panel.grid.minor = element_blank(),
       panel.background = element_rect(fill = "white", color = NA),
       plot.background = element_rect(fill = "white", color = NA),
-      legend.position = "none"
+      legend.position = "none",
+      strip.text = element_text(color = "black", face = "bold"),
+      strip.background = element_rect(fill = "white", color = "black")
     )
 
   # If we pass the relative normalization value then plot the horizontal line
@@ -105,18 +107,18 @@ relative_norm_data <- prepare_violin_data("ctnorm_relative")
 # Get relative normalization value
 relative_norm_value <- unique(relative_norm_data$log_total_count)[1]
 
-# Create figures 3a and 3b
-fig_2a <- create_violin_plot(
+# Create figures 4a and 4b
+fig_4a <- create_violin_plot(
   read_depth_data, 
   "Metabolic gene expression",
-  "fig_3a_read_depth_violin"
+  "fig_4a_read_depth_violin"
 )
 
-fig_2b <- create_violin_plot(
+fig_4b <- create_violin_plot(
   global_norm_data, 
   "Metabolic gene expression",
-  "fig_3b_global_norm_violin",
+  "fig_4b_global_norm_violin",
   relative_norm_value
 )
 
-  message(paste("Completed writing 3A and 3B to file."))
+message(paste("Completed writing 4A and 4B to file."))

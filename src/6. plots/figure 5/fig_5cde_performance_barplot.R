@@ -11,6 +11,7 @@ load_model_performance <- function(file_path = "output/2. models/model_performan
   perf_data <- read_csv(file_path, show_col_types = FALSE)
   
   # Clean and filter the data
+  metric_cols <- intersect(c("AUC", "Accuracy", "F1_Score", "Precision", "Recall", "Balanced_Accuracy", "Specificity"), names(perf_data))
   clean_data <- perf_data %>%
     mutate(
       # Clean model names
@@ -24,58 +25,31 @@ load_model_performance <- function(file_path = "output/2. models/model_performan
         str_to_lower(Model) == "svm_rbf" ~ "SVM (RBF)",
         str_to_lower(Model) == "svm_linear" ~ "SVM (Linear)",
         TRUE ~ str_to_title(Model)
-      ),
-      # Clean normalization names
-      Dataset = case_when(
-        Dataset == "ctnorm_global" ~ "CT-norm (global)",
-        Dataset == "ctnorm_relative" ~ "CT-norm (relative)",
-        Dataset == "read_depth" ~ "Read depth",
-        TRUE ~ Dataset
-      ),
-      # Clean cell type names
-      Cell_Type = case_when(
-        Cell_Type == "all_clusters" ~ "All cell types",
-        Cell_Type == "lcam_both" ~ "LCAM both",
-        Cell_Type == "lcam_lo" ~ "LCAM low",
-        Cell_Type == "lcam_hi" ~ "LCAM high",
-        Cell_Type == "macrophages" ~ "Macrophages",
-        TRUE ~ str_to_title(Cell_Type)
-      ),
-      # Clean gene type names
-      Gene_Set = case_when(
-        Gene_Set == "metabolic" ~ "Metabolic",
-        Gene_Set == "nonmetabolic" ~ "Non-metabolic",
-        Gene_Set == "random" ~ "Random",
-        TRUE ~ str_to_title(Gene_Set)
       )
     )
+  if (length(metric_cols) > 0) {
+    clean_data <- clean_data %>% mutate(across(all_of(metric_cols), as.numeric))
+  }
   
   return(clean_data)
 }
 
 
-# Save barplots for all combinations
+# Save barplots for all combinations in figure s5 with subdirectories for normalization, cell type, gene set (in that order)
 save_all_performance_barplots <- function(perf_data, 
-                                          datasets = NULL, 
-                                          cell_types = NULL, 
-                                          gene_sets = NULL, 
                                           metrics_to_plot = c("AUC", "Accuracy", "F1_Score", "Precision", "Recall", "Balanced_Accuracy", "Specificity", "MCC")) {
+  # Use raw (uncleaned) values for iteration
+  raw_datasets <- unique(perf_data$Dataset)
+  raw_cell_types <- unique(perf_data$Cell_Type)
+  raw_gene_sets <- unique(perf_data$Gene_Set)
 
-  datasets <- unique(perf_data$Dataset)
-  cell_types <- unique(perf_data$Cell_Type)
-  gene_sets <- unique(perf_data$Gene_Set)
+  # Output root for figure s5
+  s5_metrics_root <- file.path("output/6. plots/figure s5/performance")
+  dir.create(s5_metrics_root, recursive = TRUE, showWarnings = FALSE)
 
-  # Output path
-  s1_metrics_root <- file.path("output/6. plots/figure s1/metrics")
-  dir.create(s1_metrics_root, recursive = TRUE, showWarnings = FALSE)
-
-  # Output for figure 4 (accuracy barplot)
-  fig4_dir <- file.path("output/6. plots/figure 4")
-  dir.create(fig4_dir, recursive = TRUE, showWarnings = FALSE)
-
-  for (dataset in datasets) {
-    for (cell_type in cell_types) {
-      for (gene_set in gene_sets) {
+  for (dataset in raw_datasets) {
+    for (cell_type in raw_cell_types) {
+      for (gene_set in raw_gene_sets) {
         filtered_data <- perf_data %>%
           filter(Dataset == dataset, Cell_Type == cell_type, Gene_Set == gene_set)
         if (nrow(filtered_data) == 0) next
@@ -108,7 +82,7 @@ save_all_performance_barplots <- function(perf_data,
               axis.text.x = element_text(size = 15, color = "black"),
               axis.text.y = element_text(size = 15, color = "black"),
               axis.title.x = element_text(size = 17, color = "black", face = "plain"),
-              axis.title.y = element_blank(),
+              axis.title.y = element_text(size = 17, color = "black", face = "plain"),
               legend.position = "none",
               panel.grid.minor = element_blank(),
               panel.grid.major.y = element_blank(),
@@ -120,40 +94,30 @@ save_all_performance_barplots <- function(perf_data,
               axis.line = element_line(color = "black", linewidth = 0.8)
             ) +
             labs(
-              x = "Model",
-              y = NULL,
+              x = NULL,
+              y = metric,
               title = sprintf("%s\n%s | %s | %s", metric, dataset, cell_type, gene_set)
             )
 
-          # Directory for this metric
-          metric_dir <- file.path(s1_metrics_root, metric)
-          dir.create(metric_dir, recursive = TRUE, showWarnings = FALSE)
-          # File name of combination but remove special characters
-          safe_dataset <- gsub("[^a-zA-Z0-9_]", "_", dataset)
-          safe_celltype <- gsub("[^a-zA-Z0-9_]", "_", cell_type)
-          safe_geneset <- gsub("[^a-zA-Z0-9_]", "_", gene_set)
-          metric_file <- file.path(metric_dir, sprintf("barplot_%s_%s_%s.png", safe_dataset, safe_celltype, safe_geneset))
+          # Directory for this combination: figure s5/performance/<norm>/<cell_type>/<gene_set>/
+          safe_dataset <- gsub("[^a-zA-Z0-9_]+", "_", dataset)
+          safe_celltype <- gsub("[^a-zA-Z0-9_]+", "_", cell_type)
+          safe_geneset <- gsub("[^a-zA-Z0-9_]+", "_", gene_set)
+          combo_dir <- file.path(s5_metrics_root, safe_dataset, safe_celltype, safe_geneset)
+          dir.create(combo_dir, recursive = TRUE, showWarnings = FALSE)
+          metric_file <- file.path(combo_dir, sprintf("barplot_%s.png", metric))
           ggsave(metric_file, p_metric, width = 8, height = 5, dpi = 300)
-
-          # If this is the main barplot also save to figure 4
-          if (tolower(metric) == "accuracy" &&
-              dataset == "CT-norm (global)" &&
-              cell_type == "All cell types" &&
-              gene_set == "Metabolic") {
-            fig4_file <- file.path(fig4_dir, "fig_4b_accuracy_barplot.png")
-            ggsave(fig4_file, p_metric, width = 8, height = 5, dpi = 300)
-          }
         }
       }
     }
   }
-  message("Completed writing figure 4B to file.")
+  message("Completed writing figure 5CDE to file.")
 }
 
 
 # Main function
-generate_performance_plots <- function(performance_file = "output/2. models/model_performance.csv",
-                                       focused_dataset = "ctnorm_global") {
+# Iterate over all datasets in the file, not just a focused one
+generate_performance_plots <- function(performance_file = "output/2. models/model_performance.csv") {
   # Use relative paths
   if (!file.exists(performance_file) && !startsWith(performance_file, "/") && !grepl("^[A-Za-z]:", performance_file)) {
     performance_file_path <- file.path(performance_file)
@@ -163,7 +127,7 @@ generate_performance_plots <- function(performance_file = "output/2. models/mode
 
   perf_data <- load_model_performance(performance_file_path)
 
-  # Save all barplots for all combinations
+  # Save all barplots for all combinations (all datasets)
   save_all_performance_barplots(perf_data)
 
   return(list(data = perf_data))
@@ -171,4 +135,4 @@ generate_performance_plots <- function(performance_file = "output/2. models/mode
 
 
 # Run plotting function
-performance_results <- generate_performance_plots(focused_dataset = "ctnorm_global")
+performance_results <- generate_performance_plots()

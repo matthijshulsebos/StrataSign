@@ -357,7 +357,7 @@ run_intersector <- function(
   base_models_dir = "output/2. models",
   base_output_dir = "output/3. intersector",
   min_models_param = 3,
-  dataset_types_to_process = c("ctnorm_global", "ctnorm_relative", "read_depth"),
+  dataset_types_to_process = c("ctnorm_global", "ctnorm_global_zscaled", "ctnorm_relative", "read_depth"),
   cell_types_to_process = c("all_clusters", "macrophages", "lcam_hi", "lcam_lo", "lcam_both"),
   gene_types_to_process = c("metabolic", "nonmetabolic", "random"),
   sublineage_color_map_path = "output/3. intersector/sublineage_colors.rds"

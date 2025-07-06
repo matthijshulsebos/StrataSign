@@ -16,8 +16,6 @@ CELL_TYPE_SETS <- list(
   lcam_lo = c(56, 34, 53, 10, 25, 54, 55, 57, 45, 14, 16),
   lcam_both = c(c(44, 9, 17, 28, 46, 11, 42), c(56, 34, 53, 10, 25, 54, 55, 57, 45, 14, 16)),
   macrophages = c(5, 8, 10, 11, 25, 32, 33, 35, 38, 42, 47, 54, 55, 57),
-  has_10_in_50pct = c(1, 10, 11, 13, 14, 17, 18, 19, 2, 20, 23, 25, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 42, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 7, 8, 9),
-  has_10_in_70pct = c(1, 10, 14, 18, 2, 25, 29, 30, 32, 33, 34, 35, 36, 38, 39, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59),
   all_clusters = NULL
 )
 
@@ -133,7 +131,8 @@ save_results <- function(long_data, method_name, cell_type, gene_type) {
   
   # Join with metadata
   data_with_meta <- data_wide %>%
-    left_join(table_s1 %>% select(sample_ID, patient_ID, tissue), by = "sample_ID") %>%
+    left_join(table_s1 %>% select(sample_ID, patient_ID, tissue) %>% 
+    mutate(sample_ID = as.character(sample_ID)), by = "sample_ID") %>%
     filter(!is.na(tissue))
   
   if (nrow(data_with_meta) > 0) {
@@ -145,7 +144,9 @@ save_results <- function(long_data, method_name, cell_type, gene_type) {
     # Save complete dataset
     X_complete <- data_with_meta %>% select(-sample_ID, -patient_ID, -tissue)
     y_complete <- data_with_meta$tissue
-    metadata_complete <- table_s1 %>% filter(sample_ID %in% data_with_meta$sample_ID)
+    metadata_complete <- table_s1 %>% 
+      mutate(sample_ID = as.character(sample_ID)) %>%
+      filter(sample_ID %in% data_with_meta$sample_ID)
     
     write_csv(X_complete, file.path(output_dir, paste0("X_complete_", cell_type, suffix, ".csv")))
     write_csv(data.frame(y = y_complete), file.path(output_dir, paste0("y_complete_", cell_type, suffix, ".csv")))
@@ -168,8 +169,12 @@ save_results <- function(long_data, method_name, cell_type, gene_type) {
       y_train <- train_data$tissue
       y_test <- test_data$tissue
       
-      metadata_train <- table_s1 %>% filter(sample_ID %in% train_data$sample_ID)
-      metadata_test <- table_s1 %>% filter(sample_ID %in% test_data$sample_ID)
+      metadata_train <- table_s1 %>% 
+        mutate(sample_ID = as.character(sample_ID)) %>%
+        filter(sample_ID %in% train_data$sample_ID)
+      metadata_test <- table_s1 %>% 
+        mutate(sample_ID = as.character(sample_ID)) %>%
+        filter(sample_ID %in% test_data$sample_ID)
       
       # Write datasets to csv files
       write_csv(X_train, file.path(output_dir, paste0("X_train_", cell_type, suffix, ".csv")))
@@ -284,7 +289,7 @@ save_celltype_total_counts <- function(normalized_data, normalization_method, ce
   total_counts <- normalized_data %>%
     group_by(sample_ID, cluster_ID) %>%
     summarise(total_count = sum(normalized_count), .groups = 'drop') %>%
-    left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
+    left_join(table_s1 %>% select(sample_ID, tissue) %>% mutate(sample_ID = as.character(sample_ID)), by = "sample_ID") %>%
     left_join(annots_list, by = c("cluster_ID" = "cluster")) %>%
     mutate(
       normalization_method = normalization_method,
@@ -306,7 +311,8 @@ save_celltype_total_counts <- function(normalized_data, normalization_method, ce
   
   # Append to existing file or create new one
   if (file.exists(output_path)) {
-    existing_data <- read_csv(output_path, show_col_types = FALSE)
+    existing_data <- read_csv(output_path, show_col_types = FALSE) %>%
+      mutate(sample_ID = as.character(sample_ID))
     combined_data <- bind_rows(existing_data, total_counts)
     write_csv(combined_data, output_path)
   } else {
@@ -315,24 +321,31 @@ save_celltype_total_counts <- function(normalized_data, normalization_method, ce
 }
 
 
-# Global normalization approach
-run_global_approach <- function(aggregated_data) {
-  message("\n GLOBAL NORMALIZATION APPROACH")
-  
+
+# Global normalization approach with optional z-scaling
+run_global_approach <- function(aggregated_data, zscale = FALSE) {
+  if (zscale) {
+    message("\n GLOBAL NORMALIZATION APPROACH (z-scaled)")
+    norm_method_name <- "ctnorm_global_zscaled"
+  } else {
+    message("\n GLOBAL NORMALIZATION APPROACH")
+    norm_method_name <- "ctnorm_global"
+  }
+
   # Apply cell type normalization on the entire dataset
   global_ctnorm_data <- apply_celltype_normalization(aggregated_data)
 
   # Create each ablation subset for cluster and gene sets
   for (cell_type in names(CELL_TYPE_SETS)) {
     cluster_ids <- CELL_TYPE_SETS[[cell_type]]
-    
+
     # Filter by clusters
     if (!is.null(cluster_ids)) {
       subset_data <- global_ctnorm_data %>% filter(cluster_ID %in% cluster_ids)
     } else {
       subset_data <- global_ctnorm_data
     }
-    
+
     for (gene_type in GENE_TYPE_SETS) {
       # Retrieve the filtered gene set
       all_genes_in_data <- unique(subset_data$gene)
@@ -340,21 +353,44 @@ run_global_approach <- function(aggregated_data) {
 
       # Filter the subset_data based on the filtered gene set
       gene_filtered_data <- subset_data %>% filter(gene %in% filtered_genes)
-      
+
       # Save total counts before log transformation
-      save_celltype_total_counts(gene_filtered_data, "ctnorm_global", cell_type, gene_type)
-      
+      save_celltype_total_counts(gene_filtered_data, norm_method_name, cell_type, gene_type)
+
       # Calculate fold changes before log transformation
-      calculate_fold_changes_for_normalization(gene_filtered_data, table_s1, annots_list, "ctnorm_global", cell_type, gene_type)
-      
+      calculate_fold_changes_for_normalization(gene_filtered_data, table_s1, annots_list, norm_method_name, cell_type, gene_type)
+
       # Log1p transformation
       log_data <- gene_filtered_data %>% mutate(log_normalized_count = log1p(normalized_count))
-      
-      # Add feature names
-      final_data <- create_features(log_data, annots_list)
-      
+
+      # Optionally z-scale each feature across samples
+      if (zscale) {
+        # Add feature names
+        log_data <- create_features(log_data, annots_list)
+        # Pivot to wide
+        data_wide <- log_data %>%
+          select(sample_ID, gene_cluster, log_normalized_count) %>%
+          pivot_wider(names_from = gene_cluster, values_from = log_normalized_count, values_fill = 0)
+        # Z-scale each feature (column, except sample_ID)
+        feature_cols <- setdiff(colnames(data_wide), "sample_ID")
+        data_wide[feature_cols] <- lapply(data_wide[feature_cols], function(x) as.numeric(scale(x)))
+        # Pivot back to long
+        log_data_z <- data_wide %>%
+          pivot_longer(-sample_ID, names_to = "gene_cluster", values_to = "log_normalized_count")
+        # Add cluster_ID and gene columns back using gene_cluster
+        log_data_z <- log_data_z %>%
+          mutate(
+            gene = sub("@.*", "", gene_cluster),
+            cluster_ID = as.numeric(sub(".*_", "", gene_cluster))
+          )
+        final_data <- log_data_z
+      } else {
+        # Add feature names
+        final_data <- create_features(log_data, annots_list)
+      }
+
       # Save results
-      save_results(final_data, "ctnorm_global", cell_type, gene_type)
+      save_results(final_data, norm_method_name, cell_type, gene_type)
     }
   }
 }
@@ -461,16 +497,30 @@ run_read_depth_approach <- function(aggregated_data) {
 # Apply CP10K normalization to the filtered umitab data
 cp10k_normalized_umitab <- apply_cp10k_normalization(umitab_filtered)
 
+# Save CP10K normalized matrix to file
+output_dir_cp10k <- "output/6. plots/data/cp10k"
+dir.create(output_dir_cp10k, recursive = TRUE, showWarnings = FALSE)
+
+# Save as RDS to preserve sparse matrix format and metadata
+saveRDS(cp10k_normalized_umitab, file.path(output_dir_cp10k, "cp10k_normalized_umitab.rds"))
+
+# Save cell metadata for CP10K normalized data
+write_csv(cell_metadata_final, file.path(output_dir_cp10k, "cell_metadata_final.csv"))
+
 # Convert CP10K normalized data to aggregated format
 aggregated_data <- aggregate_umitab_to_long(cp10k_normalized_umitab, cell_metadata_final)
 
-# Run global approach
-run_global_approach(aggregated_data)
+
+# Run global approach (standard)
+run_global_approach(aggregated_data, zscale = FALSE)
+
+# Run global approach (z-scaled)
+run_global_approach(aggregated_data, zscale = TRUE)
 
 # Run relative approach
-run_relative_approach(cp10k_normalized_umitab, cell_metadata_final)
+#run_relative_approach(cp10k_normalized_umitab, cell_metadata_final)
 
 # Run read depth normalization approach
-run_read_depth_approach(aggregated_data)
+#run_read_depth_approach(aggregated_data)
 
 message("\n Preprocessing pipeline completed.")

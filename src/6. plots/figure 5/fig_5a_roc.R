@@ -7,7 +7,7 @@ library(purrr)
 
 
 # Define all combinations
-glob_norms <- c("ctnorm_global", "ctnorm_relative", "read_depth")
+glob_norms <- c("ctnorm_global", "ctnorm_global_zscaled", "ctnorm_relative", "read_depth")
 celltype_sets <- c("all_clusters", "macrophages")
 gene_types <- c("metabolic", "nonmetabolic", "random")
 
@@ -82,39 +82,30 @@ plot_roc_curves_for_combo <- function(norm, celltype, genetype) {
     }
   })
 
-  # Create a mapping of unique identifiers to colors
-  group_ids <- match(roc_data_list, unique(roc_data_list))
-  primary_colors <- c(
-    "#E41A1C",
-    "#377EB8",
-    "#4DAF4A",
-    "#000000",
-    "#FF7F00",
-    "#984EA3",
-    "#00CED1",
-    "#FFD700"
-  )
-  group_colors <- rep(primary_colors, length.out = length(unique(group_ids)))
-  model_colors <- setNames(group_colors[group_ids], names(roc_list))
+  # Use RColorBrewer Set1 palette for all model colors
+  set1_colors <- RColorBrewer::brewer.pal(9, "Set1")
+  n_models <- length(roc_list)
+  model_colors <- setNames(rep(set1_colors, length.out = n_models), names(roc_list))
   auc_labels <- sapply(names(roc_list), function(name) {
     auc_val <- pROC::auc(roc_list[[name]])
     sprintf("%s (AUC=%.2f)", name, auc_val)
   })
 
-  theme_unified <- theme_bw(base_size = 16) +
+  theme_unified <- theme_bw(base_size = 16, base_family = "sans") +
     theme(
-      plot.title = element_text(face = "plain", hjust = 0.5, size = 18),
-      plot.subtitle = element_text(face = "plain", hjust = 0.5, size = 15),
-      axis.title = element_text(face = "plain", size = 16),
-      axis.text = element_text(size = 14),
-      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
-      legend.title = element_text(face = "plain", size = 15),
-      legend.text = element_text(size = 13),
-      panel.grid = element_blank(),
+      plot.title = element_text(face = "plain", hjust = 0.5, size = 18, color = "black"),
+      plot.subtitle = element_text(face = "plain", hjust = 0.5, size = 15, color = "black"),
+      axis.title = element_text(face = "plain", size = 16, color = "black"),
+      axis.text = element_text(size = 14, color = "black"),
+      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, color = "black"),
+      legend.title = element_text(face = "plain", size = 15, color = "black"),
+      legend.text = element_text(size = 13, color = "black"),
+      # Enable grid lines for publication clarity
+      panel.grid.major = element_line(color = "grey80", size = 0.5),
       legend.background = element_rect(color = NA, fill = NA),
       legend.box.background = element_blank()
     )
-  plt <- ggroc(roc_list, legacy.axes=TRUE) +
+  plt <- ggroc(roc_list, legacy.axes=TRUE, size = 1) +
     labs(
       title = NULL,
       subtitle = NULL,
@@ -122,22 +113,26 @@ plot_roc_curves_for_combo <- function(norm, celltype, genetype) {
     ) +
     scale_color_manual(values = model_colors, labels = auc_labels) +
     theme_unified
-  plt <- plt + coord_cartesian(xlim = c(0, 1.05))
+  plt <- plt + coord_fixed(ratio = 1, xlim = c(0, 1.05), ylim = c(0, 1.05))
+  # Move legend to the right outside the plot area and use a wide output to maximize the square plot panel
+  plt <- plt + theme(
+    legend.position = "right",
+    legend.justification = c(0, 1),
+    legend.box.margin = margin(0, 0, 0, 20),
+    plot.margin = margin(5, 5, 5, 5)
+  )
 
-  # Save all to figure s1/roc
-  outdir <- file.path("output/6. plots/figure s1", "roc")
-  dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
-  filename <- paste0("roc_", norm, "_", celltype, "_", genetype, ".png")
-  ggsave(file.path(outdir, filename), plt, width=8, height=6)
+  # Save all to figure s5/roc/<norm>/<celltype>/<genetype>/roc.png
+  s5_roc_root <- file.path("output/6. plots/figure s5/roc")
+  safe_norm <- gsub("[^a-zA-Z0-9_]+", "_", norm)
+  safe_celltype <- gsub("[^a-zA-Z0-9_]+", "_", celltype)
+  safe_genetype <- gsub("[^a-zA-Z0-9_]+", "_", genetype)
+  combo_dir <- file.path(s5_roc_root, safe_norm, safe_celltype, safe_genetype)
+  dir.create(combo_dir, recursive = TRUE, showWarnings = FALSE)
+  s5_roc_file <- file.path(combo_dir, "roc.png")
+  ggsave(s5_roc_file, plt, width=10, height=6)
 
-  # Copy the figure if this is the global normalization, all_clusters, metabolic
-  if (norm == "ctnorm_global" && celltype == "all_clusters" && genetype == "metabolic") {
-    outdir_main <- "output/6. plots/figure 4"
-    dir.create(outdir_main, recursive = TRUE, showWarnings = FALSE)
-    ggsave(file.path(outdir_main, "fig_4a_roc_all_metabolic.png"), plt, width=8, height=6)
-
-    message("Completed writing figure 4a to file.")
-  }
+  # Do not save a copy to figure 4 or print a message for figure 4
   return(plt)
 }
 
