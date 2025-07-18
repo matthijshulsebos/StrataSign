@@ -5,11 +5,8 @@ library(org.Hs.eg.db)
 library(fs)
 library(stringr)
 
-# Utils for mapping gene symbols to entrez ids
 source("src/0. utils/format_utils.R") 
 
-
-# Set paths and parameters
 INTERSECTOR_PARENT_INPUT_DIR <- "output/3. intersector"
 PATHWAY_MAPPING_OUTPUT_PARENT_DIR <- "output/5. pathway mapping"
 KEGG_ORGANISM_CODE <- "hsa"
@@ -25,12 +22,15 @@ map_kegg_geneid_to_symbols <- function(gene_id_str, entrez_to_symbol_map) {
   paste(na.omit(symbols), collapse="/")
 }
 
-# Map gene symbols to entrez ids
+
+# Parse KEGG result
 process_kegg_results <- function(kegg_result_df, entrez_to_symbol_map, meta_scores_dt = NULL) {
+  # These columns are based on what the KEGG API returns
   kegg_result_df$InputGeneSymbolsInPathway <- sapply(
     kegg_result_df$geneID, map_kegg_geneid_to_symbols, entrez_to_symbol_map
   )
 
+  # The number of genes that are part of the pathway
   kegg_result_df$GeneCountFromInput <- sapply(
     str_split(kegg_result_df$geneID, "/"), length
   )
@@ -38,9 +38,9 @@ process_kegg_results <- function(kegg_result_df, entrez_to_symbol_map, meta_scor
   # Get all unique cell types in the data
   all_cell_types <- unique(meta_scores_dt$sublineage)
   
-  # For each pathway, count genes per cell type
+  # For each pathway count genes per cell type
   for (cell_type in all_cell_types) {
-    # Create safe column name (replace spaces/special chars with underscores)
+    # Replaces any special characters in cell type names with underscores
     col_name <- paste0("Genes_", gsub("[^A-Za-z0-9]", "_", cell_type))
     
     kegg_result_df[[col_name]] <- sapply(
@@ -52,7 +52,7 @@ process_kegg_results <- function(kegg_result_df, entrez_to_symbol_map, meta_scor
     )
   }
   
-  # Calculate total number of contributing cell types (for backward compatibility)
+  # Calculate total number of contributing cell types
   kegg_result_df$NumberOfContributingCellTypes <- sapply(
     kegg_result_df$InputGeneSymbolsInPathway, function(gs_string) {
       current_pathway_gene_symbols <- str_split(gs_string, "/")[[1]]
@@ -60,11 +60,11 @@ process_kegg_results <- function(kegg_result_df, entrez_to_symbol_map, meta_scor
     }
   )
   
-  # Calculate total number of gene/cell type combinations contributing to each pathway
+  # Calculate total number features contributing to each pathway
   kegg_result_df$TotalGeneCellTypeCombinations <- sapply(
     kegg_result_df$InputGeneSymbolsInPathway, function(gs_string) {
       current_pathway_gene_symbols <- str_split(gs_string, "/")[[1]]
-      # Count all gene/cell type pairs (not just unique genes)
+      # Count number of features
       nrow(meta_scores_dt[gene %in% current_pathway_gene_symbols])
     }
   )
@@ -96,6 +96,8 @@ process_kegg_results <- function(kegg_result_df, entrez_to_symbol_map, meta_scor
   # Create dynamic column selection including all cell type columns
   base_columns <- c("PathwayID", "PathwayName", "GeneCountFromInput", "NumberOfContributingCellTypes", 
                    "TotalGeneCellTypeCombinations", "InputGeneSymbolsInPathway", "AvgMetaScore", "SumMetaScore")
+
+  # If it starts with Genes_ then we want to follow it with cell type names in order to avoid typing everything out
   cell_type_columns <- names(kegg_result_df)[grepl("^Genes_", names(kegg_result_df))]
   all_columns <- c(base_columns, cell_type_columns)
   
@@ -109,12 +111,13 @@ process_kegg_results <- function(kegg_result_df, entrez_to_symbol_map, meta_scor
       InputGeneSymbolsInPathway,
       AvgMetaScore,
       SumMetaScore,
-      all_of(cell_type_columns)
+      dplyr::all_of(cell_type_columns)
     ) %>%
-    arrange(desc(GeneCountFromInput), desc(NumberOfContributingCellTypes))
+    dplyr::arrange(desc(GeneCountFromInput), desc(NumberOfContributingCellTypes))
 
   kegg_result_df
 }
+
 
 # Retrieve all enriched pathways from KEGG
 perform_kegg_mapping <- function(entrez_vector) {
@@ -132,17 +135,16 @@ perform_kegg_mapping <- function(entrez_vector) {
 # Set output dir
 dir_create(PATHWAY_MAPPING_OUTPUT_PARENT_DIR, recurse = TRUE)
 
-# Get all normalization methods from the intersector directory
+# Get all normalization strategies from the intersector dir
 normalization_methods <- list.dirs(INTERSECTOR_PARENT_INPUT_DIR, full.names = FALSE, recursive = FALSE)
 
 if (length(normalization_methods) == 0) {
-  stop("No normalization methods found in: ", INTERSECTOR_PARENT_INPUT_DIR)
+  stop("No normalization strategies found in: ", INTERSECTOR_PARENT_INPUT_DIR)
 }
 
-# Process each normalization method
-for (normalization_method in normalization_methods) {
-
-  normalization_dir <- file.path(INTERSECTOR_PARENT_INPUT_DIR, normalization_method)
+# Process each normalization strategy
+for (normalization_strategy in normalization_methods) {
+  normalization_dir <- file.path(INTERSECTOR_PARENT_INPUT_DIR, normalization_strategy)
 
   # Get all cell type sets
   cell_type_sets <- list.dirs(normalization_dir, full.names = FALSE, recursive = FALSE)
@@ -152,12 +154,13 @@ for (normalization_method in normalization_methods) {
     next
   }
 
-  # Process each cell type set
+  # Process each cell type set like all_clusters or macrophages
   for (cell_type_set in cell_type_sets) {
     cell_type_set_dir <- file.path(normalization_dir, cell_type_set)
 
     # Only process the metabolic genes
     gene_type <- "metabolic"
+
     gene_type_dir <- file.path(cell_type_set_dir, gene_type)
     meta_scores_file_path <- file.path(gene_type_dir, "meta_scores.csv")
 
@@ -166,37 +169,35 @@ for (normalization_method in normalization_methods) {
       next
     }
 
-    # Read meta scores
+    # Currently uses data tables but switch to tibbles at some point with read_csv
     meta_scores_dt <- fread(meta_scores_file_path)
 
     # Map genes to Entrez IDs
     genes_for_combination <- unique(meta_scores_dt$gene)
     entrez_df <- map_symbols_to_entrez(genes_for_combination)
     entrez_vector <- unique(na.omit(entrez_df$ENTREZID))
-    symbol_entrez_map <- setNames(entrez_df$SYMBOL, entrez_df$ENTREZID)
 
-    if (length(entrez_vector) == 0) {
-      warning(paste("No Entrez IDs found for combination:", normalization_method, cell_type_set, gene_type))
-      next
-    }
+    # Values are symbols and the names are Entrez IDs
+    symbol_entrez_map <- setNames(entrez_df$SYMBOL, entrez_df$ENTREZID)
 
     # Perform KEGG mapping
     kegg_map_obj <- perform_kegg_mapping(entrez_vector)
 
     if (!is.null(kegg_map_obj) && nrow(as.data.frame(kegg_map_obj)) > 0) {
+      # Process KEGG results
       processed_results <- process_kegg_results(
         as.data.frame(kegg_map_obj),
         symbol_entrez_map,
         meta_scores_dt
       )
-
-      # Filter for metabolic pathways inline
+      
+      # Filter for metabolic pathways
       processed_results <- processed_results %>% filter(PathwayID %in% METABOLIC_PATHWAYS)
 
-      # Create output directory structure
+      # Create output dir structure
       combination_output_dir <- file.path(
         PATHWAY_MAPPING_OUTPUT_PARENT_DIR,
-        normalization_method,
+        normalization_strategy,
         cell_type_set,
         gene_type
       )
@@ -205,13 +206,11 @@ for (normalization_method in normalization_methods) {
       # Save results
       output_file <- file.path(
         combination_output_dir,
-        paste0("kegg_pathway_enrichment_", normalization_method, "_", cell_type_set, "_", gene_type, ".csv")
+        paste0("kegg_pathway_enrichment_", normalization_strategy, "_", cell_type_set, "_", gene_type, ".csv")
       )
       write.csv(processed_results, output_file, row.names = FALSE)
-
-      message(paste("Saved results to:", output_file))
     } else {
-      message(paste("No KEGG enrichment results for combination:", normalization_method, cell_type_set, gene_type))
+      message(paste("No KEGG results for combination:", normalization_strategy, cell_type_set, gene_type))
     }
   }
 }
