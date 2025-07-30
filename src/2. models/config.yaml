@@ -1,25 +1,26 @@
 training_parameters:
   # Choose the type of normalization to apply to the data
   norm_type:
-    ctnorm_global: true
-    ctnorm_relative: true
-    read_depth: true
+    ctnorm_global: false
+    ctnorm_global_zscaled: true
+    ctnorm_relative: false
+    read_depth: false
 
-  # Choose the type of genes to include in the training
+  # Choose the type of genes to do training runs for
   gene_type:
     metabolic: true
     nonmetabolic: true
-    random: true
+    random: false
 
-  # Choose the types of cells to train on
+  # Choose the types of cells to do training runs for
   cell_type:
     macrophages: true
-    lcam_hi: true
-    lcam_lo: true
-    lcam_both: true
+    lcam_hi: false
+    lcam_lo: false
+    lcam_both: false
     all_clusters: true
-    has_10_in_50pct: true
-    has_10_in_70pct: true
+    has_10_in_50pct: false
+    has_10_in_70pct: false
 
   # Set which models to train
   models:

@@ -15,9 +15,9 @@ load_n_models_occur <- function(file_path, method_name, cell_type, gene_type) {
   df %>% select(n_models_occur) %>% mutate(method = method_name, cell_type = cell_type, gene_type = gene_type)
 }
 
-# Output root for figure s6
-s6_root <- file.path("output/6. plots/figure s6/meta_prevalence")
-dir.create(s6_root, recursive = TRUE, showWarnings = FALSE)
+# Output root for meta prevalence plots
+prevalence_root <- file.path("output/6. plots/figure 7/meta_prevalence")
+dir.create(prevalence_root, recursive = TRUE, showWarnings = FALSE)
 
 # Loop over all combinations
 for (norm in norms) {
@@ -28,12 +28,12 @@ for (norm in norms) {
       nmodels_df <- load_n_models_occur(file_path, norm, cell_type, gene_type)
       if (is.null(nmodels_df)) next
 
-      # Summarize counts for each n_models_occur (single normalization method)
+      # Summarize counts for each model occurrence
       nmodels_summary <- nmodels_df %>%
         group_by(n_models_occur) %>%
         summarise(count = n(), .groups = 'drop')
 
-      # Bar plot for model occurrence count values (single normalization method)
+      # Bar plot for model occurrence count values
       p <- ggplot(nmodels_summary, aes(x = factor(n_models_occur), y = count)) +
         geom_bar(stat = "identity", fill = "#377EB8", color = "black", width = 0.7) +
         theme_bw(base_size = 16, base_family = "sans") +
@@ -44,18 +44,20 @@ for (norm in norms) {
           legend.position = "none",
           panel.grid = element_blank(),
           legend.background = element_rect(color = NA, fill = NA),
-          legend.box.background = element_blank()
+          legend.box.background = element_blank(),
+          panel.background = element_rect(fill = "transparent", color = NA),
+          plot.background = element_rect(fill = "transparent", color = NA)
         ) +
         labs(x = "Model prevalence", y = "Number of features")
 
-      # Save to figure s6/meta_prevalence/<norm>/<cell_type>/<gene_type>/model_count_distribution.png
+      # Save to figure
       safe_norm <- gsub("[^a-zA-Z0-9_]+", "_", norm)
       safe_celltype <- gsub("[^a-zA-Z0-9_]+", "_", cell_type)
       safe_genetype <- gsub("[^a-zA-Z0-9_]+", "_", gene_type)
-      combo_dir <- file.path(s6_root, safe_norm, safe_celltype, safe_genetype)
+      combo_dir <- file.path(prevalence_root, safe_norm, safe_celltype, safe_genetype)
       dir.create(combo_dir, recursive = TRUE, showWarnings = FALSE)
-      s6_file <- file.path(combo_dir, "model_count_distribution.png")
-      ggsave(s6_file, p, width = 7, height = 5)
+      prevalence_file <- file.path(combo_dir, "model_count_distribution.png")
+      ggsave(prevalence_file, p, width = 7, height = 5, bg = "transparent")
     }
   }
 }

@@ -34,7 +34,9 @@ plot_and_save_density <- function(df, method_label, outdir, fname) {
       axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1, color = "black"),
       legend.position = "none",
       panel.grid = element_blank(),
-      strip.text = element_text(color = "black", face = "bold")
+      strip.text = element_text(color = "black", face = "bold"),
+      panel.background = element_rect(fill = "transparent", color = NA),
+      plot.background = element_rect(fill = "transparent", color = NA)
     ) +
     labs(
       title = NULL,
@@ -44,7 +46,7 @@ plot_and_save_density <- function(df, method_label, outdir, fname) {
     )
 
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
-  ggsave(file.path(outdir, fname), p, width = 7, height = 5)
+  ggsave(file.path(outdir, fname), p, width = 7, height = 5, bg = "transparent")
 }
 
 # Define all combinations
@@ -52,9 +54,9 @@ norms <- c("ctnorm_global", "ctnorm_relative", "read_depth")
 cell_types <- c("all_clusters")
 gene_types <- c("metabolic")
 
-# Output root for figure s6
-s6_root <- file.path("output/6. plots/figure s6/meta_score_dist")
-dir.create(s6_root, recursive = TRUE, showWarnings = FALSE)
+# Output root for meta score distribution plots
+score_dist_root <- file.path("output/6. plots/figure 7/score_dist")
+dir.create(score_dist_root, recursive = TRUE, showWarnings = FALSE)
 
 # Helper to load meta_scores for a normalization method
 load_meta_scores <- function(file_path) {
@@ -70,11 +72,11 @@ for (norm in norms) {
       meta_df <- load_meta_scores(file_path)
       if (is.null(meta_df)) next
       method_label <- norm
-      # Save to figure s6/meta_score_dist/<norm>/<cell_type>/<gene_type>/meta_score_distribution.png
+      # Save to figure 7
       safe_norm <- gsub("[^a-zA-Z0-9_]+", "_", norm)
       safe_celltype <- gsub("[^a-zA-Z0-9_]+", "_", cell_type)
       safe_genetype <- gsub("[^a-zA-Z0-9_]+", "_", gene_type)
-      combo_dir <- file.path(s6_root, safe_norm, safe_celltype, safe_genetype)
+      combo_dir <- file.path(score_dist_root, safe_norm, safe_celltype, safe_genetype)
       dir.create(combo_dir, recursive = TRUE, showWarnings = FALSE)
       fname <- "meta_score_distribution.png"
       plot_and_save_density(meta_df, method_label, combo_dir, fname)

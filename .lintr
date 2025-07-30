@@ -5,5 +5,18 @@ linters: linters_with_defaults(
   trailing_whitespace_linter = NULL,
   infix_spaces_linter = NULL,
   commented_code_linter = NULL,
-  explicit_return_linter = NULL)
+  explicit_return_linter = NULL,
+  cyclocomp_linter = NULL,
+  object_length_linter = NULL,
+  object_usage_linter = NULL,
+  unused_import_linter = NULL,
+  spaces_left_parentheses_linter = NULL,
+  commas_linter = NULL,
+  quotes_linter = NULL,
+  T_and_F_symbol_linter = NULL,
+  semicolon_linter = NULL,
+  seq_linter = NULL,
+  package_hooks_linter = NULL,
+  namespace_linter = NULL,
+  object_length_linter = NULL)
 encoding: "UTF-8"

@@ -4,11 +4,11 @@ library(readr)
 library(Matrix)
 library(tibble)
 
-# Load utilities
 source("src/1. data preprocessing/training datasets/data_loader.R")
 source("src/4. fold changes/fold_changes.R")
 
-# Configuration
+
+# Define all the subsets we want to use for dataset creation
 DOUBLETS <- c(3, 4, 6, 12, 15, 21, 22, 24, 26, 27, 60)
 GENE_TYPE_SETS <- c("metabolic", "nonmetabolic", "random")
 CELL_TYPE_SETS <- list(
@@ -19,29 +19,28 @@ CELL_TYPE_SETS <- list(
   all_clusters = NULL
 )
 
-# Load datasets
+# Load all datasets and then unpack them
 datasets <- load_all_datasets()
 lung_ldm <- datasets$lung_ldm
 table_s1 <- select_representative_samples(datasets$table_s1)
 annots_list <- datasets$annots_list
 hsa01100_genes <- datasets$hsa01100_genes
 
-
-# Datasets from Leader et al. 2021
+# Select the raw UMI version from the lung dataset
 raw_umitab <- lung_ldm$dataset$umitab
+
+# Prepare cell metadata by creating complete metadata and filtering out doublets
 cell_metadata <- prepare_cell_metadata(lung_ldm, table_s1, DOUBLETS)
+
+# Cell metadata is leading and filter umitab using it
 umitab_filtered <- filter_umitab(raw_umitab, cell_metadata)
+
+# Make sure that we have cells in metadata that arent in the umitab
 cell_metadata_final <- cell_metadata %>% filter(cell_ID %in% colnames(umitab_filtered))
 
-# Remove large object from memory after extraction
+# Clear memory to avoid issues with large datasets
 rm(lung_ldm)
-gc()
-
-# Remove raw_umitab if not needed later
 rm(raw_umitab)
-gc()
-
-# Remove cell_metadata if not needed later
 rm(cell_metadata)
 gc()
 
@@ -50,24 +49,26 @@ gc()
 aggregate_umitab_to_long <- function(umitab, cell_metadata) {
   message("Converting sparse UMI matrix to aggregated long format.")
   
-  # Convert sparse matrix to triplet format
+  # Triplet format only contains non-zero values and coordinates
   umitab_triplet <- summary(umitab)
   colnames(umitab_triplet) <- c("gene_idx", "cell_idx", "count")
-  
-  # Map indices to names
+
+  # Convert indices to genes and cell IDs
   umitab_triplet$gene <- rownames(umitab)[umitab_triplet$gene_idx]
   umitab_triplet$cell_ID <- colnames(umitab)[umitab_triplet$cell_idx]
-  
-  # Convert to tibble for memory efficiency
+
+  # Convert to tibble for the dplyr functions
   umitab_triplet <- as_tibble(umitab_triplet)
   
-  # Join with metadata and aggregate
-  message("Aggregating counts by sample, cell type, gene.")
+  # Join with cell metadata and aggregate counts
   aggregated_data <- umitab_triplet %>%
     select(gene, cell_ID, count) %>%
+    # Join with cell metadata to get sample and cluster IDs for the groupby
     inner_join(cell_metadata %>% select(cell_ID, sample_ID, cluster_ID), by = "cell_ID") %>%
+    # Create transcriptional profiles per sample, cluster, and gene
     group_by(sample_ID, cluster_ID, gene) %>%
     summarise(count = sum(count), .groups = 'drop') %>%
+    # Make sure they are characters for joining later
     mutate(
       sample_ID = as.character(sample_ID),
       cluster_ID = as.numeric(cluster_ID),
@@ -78,19 +79,18 @@ aggregate_umitab_to_long <- function(umitab, cell_metadata) {
 }
 
 
-# Make sure all cell types for each sample have equal total counts
+# Scales total counts per cell type to the global average
 apply_celltype_normalization <- function(long_data) {
   message("Applying cell type normalization.")
 
-  # Calculate total counts for each cell type in each sample
+  # Calculate global average cell type total
   celltype_totals <- long_data %>%
     group_by(sample_ID, cluster_ID) %>%
     summarise(celltype_total = sum(count), .groups = 'drop')
 
-  # Calculate global average cell type total
   global_avg_celltype_total <- mean(celltype_totals$celltype_total)
-
-  # Normalize counts by cell type totals and global average
+  
+  # Scale cell type counts to the global average
   normalized_data <- long_data %>%
     left_join(celltype_totals, by = c("sample_ID", "cluster_ID")) %>%
     mutate(
@@ -103,10 +103,12 @@ apply_celltype_normalization <- function(long_data) {
 }
 
 
-# Filter genes by type
+# Takes a list of genes and spits out the filtered genes based on the gene type
 filter_genes_by_type <- function(all_genes, gene_type) {
+  # Filter on metabolic genes that occur in the data
   metabolic_genes <- hsa01100_genes$Symbol[hsa01100_genes$Symbol %in% all_genes]
   
+  # Sample genes depending on type parameter and make sure they are the same gene set size
   if (gene_type == "metabolic") {
     return(metabolic_genes)
   } else if (gene_type == "nonmetabolic") {
@@ -120,9 +122,9 @@ filter_genes_by_type <- function(all_genes, gene_type) {
 }
 
 
-# Create training datasets and write to file
+# Creates training datasets and saves them but also calculates fold changes with sourced function
 save_results <- function(long_data, method_name, cell_type, gene_type) {
-  # Pivot from long to wide format
+  # Convert from long format with only non-zero values to wide format with zeros
   data_wide <- long_data %>%
     select(sample_ID, gene_cluster, log_normalized_count) %>%
     pivot_wider(names_from = gene_cluster, 
@@ -131,52 +133,69 @@ save_results <- function(long_data, method_name, cell_type, gene_type) {
   
   # Join with metadata
   data_with_meta <- data_wide %>%
-    left_join(table_s1 %>% select(sample_ID, patient_ID, tissue) %>% 
-    mutate(sample_ID = as.character(sample_ID)), by = "sample_ID") %>%
+    left_join(
+      table_s1 %>%
+        select(sample_ID, patient_ID, tissue) %>%
+        mutate(sample_ID = as.character(sample_ID)),
+      by = "sample_ID"
+    ) %>%
     filter(!is.na(tissue))
   
+  # Save results if there are any rows
   if (nrow(data_with_meta) > 0) {
-    # Construct output path
+    # The suffix is added to the file name
     suffix <- switch(gene_type, "metabolic" = "_metabolic", "nonmetabolic" = "_nonmetabolic", "random" = "_random")
+
+    # Create output directory for the subset
     output_dir <- file.path("output", "1. data preprocessing", "training datasets", method_name, cell_type, gene_type)
     dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
     
-    # Save complete dataset
+    # Remove non transcriptional data for the complete version of the dataset
     X_complete <- data_with_meta %>% select(-sample_ID, -patient_ID, -tissue)
     y_complete <- data_with_meta$tissue
+
+    # Filter table s1 which contains sample metadata on the training data
     metadata_complete <- table_s1 %>% 
       mutate(sample_ID = as.character(sample_ID)) %>%
       filter(sample_ID %in% data_with_meta$sample_ID)
     
+    # Write the complete datasets to files
     write_csv(X_complete, file.path(output_dir, paste0("X_complete_", cell_type, suffix, ".csv")))
     write_csv(data.frame(y = y_complete), file.path(output_dir, paste0("y_complete_", cell_type, suffix, ".csv")))
     write_csv(metadata_complete, file.path(output_dir, paste0("metadata_complete_", cell_type, suffix, ".csv")))
     
-    # Create train/test split
+    # Seed for reproducibility of patient split
     set.seed(42)
+
+    # Get list of all patients and set which are used for training
     patients <- unique(data_with_meta$patient_ID)
     train_patients <- sample(patients, size = round(length(patients) * 0.7))
     
+    # Create the train and test datasets
     train_data <- data_with_meta %>% filter(patient_ID %in% train_patients)
     test_data <- data_with_meta %>% filter(!patient_ID %in% train_patients)
-    
+
+    # If the split is successful
     if (nrow(train_data) > 0 && nrow(test_data) > 0) {
-      # For training input leave out target variables
+      # Make sure to remove non transcriptional data
       X_train <- train_data %>% select(-sample_ID, -patient_ID, -tissue)
       X_test <- test_data %>% select(-sample_ID, -patient_ID, -tissue)
 
-      # Target variable is the tissue type
+      # Set the target variables
       y_train <- train_data$tissue
       y_test <- test_data$tissue
       
+      # Filter train metadata on actual train samples
       metadata_train <- table_s1 %>% 
         mutate(sample_ID = as.character(sample_ID)) %>%
         filter(sample_ID %in% train_data$sample_ID)
+
+      # Filter test metadata on actual test samples
       metadata_test <- table_s1 %>% 
         mutate(sample_ID = as.character(sample_ID)) %>%
         filter(sample_ID %in% test_data$sample_ID)
       
-      # Write datasets to csv files
+      # Write all the files to the output directory
       write_csv(X_train, file.path(output_dir, paste0("X_train_", cell_type, suffix, ".csv")))
       write_csv(X_test, file.path(output_dir, paste0("X_test_", cell_type, suffix, ".csv")))
       write_csv(data.frame(y = y_train), file.path(output_dir, paste0("y_train_", cell_type, suffix, ".csv")))
@@ -190,24 +209,25 @@ save_results <- function(long_data, method_name, cell_type, gene_type) {
 }
 
 
-# CP-median normalization and aggregation function
+# Scales counts per cell to the median counts per cell to compensate for gene type filtering
 apply_cp_median_normalization <- function(umitab_subset, cell_metadata_subset) {
-  # Calculate total counts per cell for the subset
+  # Each column is a cell and rows are genes so colsums are total counts per cell
   total_counts_per_cell <- colSums(umitab_subset)
 
-  # Calculate median total counts across all cells (excluding zeros)
+  # Calculate median counts per cell
   median_counts <- median(total_counts_per_cell[total_counts_per_cell > 0])
-  
-  # Avoid division by zero
+
+  # Set zero values to 1 to avoid division by zero
   total_counts_per_cell <- ifelse(total_counts_per_cell == 0, 1, total_counts_per_cell)
 
-  # Per column applies division of umitabs by total counts per cell, scaled to median
+  # Calculate expression proportions and scale by median count
   cp_median_cell_level_matrix <- sweep(umitab_subset, 2, total_counts_per_cell, FUN = "/") * median_counts
 
-  # Ensure cells with zero total counts have zero normalized counts
+  # Get cells that dont contain expression values
   cols_to_zero_indices <- which(colSums(umitab_subset) == 0)
+
+  # Set cells with zero counts to zero for safe measure
   if (length(cols_to_zero_indices) > 0) {
-    # Ensure that cp_median_cell_level_matrix has columns before attempting to subset
     if (ncol(cp_median_cell_level_matrix) > 0) {
       cp_median_cell_level_matrix[, cols_to_zero_indices] <- 0
     }
@@ -215,24 +235,23 @@ apply_cp_median_normalization <- function(umitab_subset, cell_metadata_subset) {
   
   # Set invalid values to zero
   cp_median_cell_level_matrix[is.na(cp_median_cell_level_matrix) | is.infinite(cp_median_cell_level_matrix)] <- 0
-  
-  # Convert sparse matrix to triplet format
+
+  # Convert to triplet format which is more efficient and removes zero values
   cp_median_triplet <- summary(cp_median_cell_level_matrix)
-  
-  # Rename columns for clarity
   colnames(cp_median_triplet) <- c("gene_idx", "cell_idx", "normalized_value") 
 
+  # Convert indices to genes and cell IDs
   cp_median_triplet_df <- data.frame(
     gene = rownames(cp_median_cell_level_matrix)[cp_median_triplet$gene_idx],
     cell_ID = colnames(cp_median_cell_level_matrix)[cp_median_triplet$cell_idx],
     normalized_value = cp_median_triplet$normalized_value
   )
 
-  # Join with cell_metadata_subset to get sample_ID and cluster_ID
+  # Add cell type metadata to the cell data
   cp_median_long_df <- cp_median_triplet_df %>%
     inner_join(cell_metadata_subset %>% select(cell_ID, sample_ID, cluster_ID), by = "cell_ID")
 
-  # Aggregate the cell-level CP-median normalized counts
+  # Aggregate the data to get the total counts per gene per cell type per sample
   aggregated_cp_median_data <- cp_median_long_df %>%
     group_by(sample_ID, cluster_ID, gene) %>%
     summarise(count = sum(normalized_value), .groups = 'drop') %>%
@@ -246,36 +265,33 @@ apply_cp_median_normalization <- function(umitab_subset, cell_metadata_subset) {
 }
 
 
-
-# CP10K normalization function for raw umitab data (sparse matrix aware)
+# Scales individual cells to total sum of 10K counts
 apply_cp10k_normalization <- function(umitab_matrix) {
   message("Applying CP10K normalization to raw umitab data.")
   
-  # Calculate total counts per cell
-  total_counts_per_cell <- Matrix::colSums(umitab_matrix)
-  
-  # Set scaling factor to 10,000 (CP10K)
+  # Each column is a cell so colsums is the total counts per cell
+  total_counts_per_cell <- colSums(umitab_matrix)
+
+  # Scale to 10K counts in total
   scaling_factor <- 10000
-  
-  # Avoid division by zero
+
+  # Set zero values to 1 to avoid division by zero
   total_counts_per_cell[total_counts_per_cell == 0] <- 1
-  
-  # Create a diagonal matrix for scaling
-  scaling_diag <- Matrix::Diagonal(x = scaling_factor / total_counts_per_cell)
-  
-  # Multiply umitab_matrix by the diagonal scaling matrix
+
+  # Matrix multiplication with a diagonal matrix for scaling to 10K
+  scaling_diag <- Diagonal(x = scaling_factor / total_counts_per_cell)
   cp10k_matrix <- umitab_matrix %*% scaling_diag
   
-  # Set cells with originally zero total counts back to zero
-  cols_to_zero <- which(Matrix::colSums(umitab_matrix) == 0)
+  # Get cells that dont contain expression values
+  cols_to_zero <- which(colSums(umitab_matrix) == 0)
   if (length(cols_to_zero) > 0) {
     cp10k_matrix[, cols_to_zero] <- 0
   }
   
-  # Handle any remaining invalid values
+  # Set invalid values to zero
   cp10k_matrix[is.na(cp10k_matrix) | is.infinite(cp10k_matrix)] <- 0
-  
-  # Ensure row and column names are preserved
+
+  # Set row and column names to match the original matrix
   rownames(cp10k_matrix) <- rownames(umitab_matrix)
   colnames(cp10k_matrix) <- colnames(umitab_matrix)
   
@@ -283,9 +299,9 @@ apply_cp10k_normalization <- function(umitab_matrix) {
 }
 
 
-# Function to save total counts per cell type per sample
+# Saves cell type total counts after normalization for figure 4
 save_celltype_total_counts <- function(normalized_data, normalization_method, cell_type_set, gene_type) {
-  # Calculate total counts per cell type per sample
+  # Aggregate total counts per cell type and sample
   total_counts <- normalized_data %>%
     group_by(sample_ID, cluster_ID) %>%
     summarise(total_count = sum(normalized_count), .groups = 'drop') %>%
@@ -298,229 +314,190 @@ save_celltype_total_counts <- function(normalized_data, normalization_method, ce
       cell_type_label = paste0(sub_lineage, "_", cluster_ID)
     ) %>%
     select(sample_ID, cluster_ID, cell_type_label, tissue, normalization_method, 
-           cell_type_set, gene_type, total_count) %>%
-    filter(!is.na(tissue))
+           cell_type_set, gene_type, total_count)
   
-  # Create output directory organized by gene type
+  # Set and create the output directory
   output_dir <- file.path("output", "6. plots", "data", "cell_type_norm_counts", gene_type, cell_type_set)
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   
-  # Create filename based on normalization method
+  # Create the filename based on normalization strategy
   filename <- paste0(normalization_method, "_total_counts.csv")
   output_path <- file.path(output_dir, filename)
   
-  # Append to existing file or create new one
+  # If the file already exists then read it and combine with new data because it contains data from multiple normalization methods
   if (file.exists(output_path)) {
     existing_data <- read_csv(output_path, show_col_types = FALSE) %>%
       mutate(sample_ID = as.character(sample_ID))
     combined_data <- bind_rows(existing_data, total_counts)
     write_csv(combined_data, output_path)
   } else {
+    # If the file doesnt exist then create it
     write_csv(total_counts, output_path)
   }
 }
 
 
+# Applies the global normalization strategy
+run_global_approach <- function(aggregated_data) {
+  message("\n GLOBAL NORMALIZATION APPROACH")
 
-# Global normalization approach with optional z-scaling
-run_global_approach <- function(aggregated_data, zscale = FALSE) {
-  if (zscale) {
-    message("\n GLOBAL NORMALIZATION APPROACH (z-scaled)")
-    norm_method_name <- "ctnorm_global_zscaled"
-  } else {
-    message("\n GLOBAL NORMALIZATION APPROACH")
-    norm_method_name <- "ctnorm_global"
-  }
+  # This is the directory where the results will be saved
+  norm_method_name <- "ctnorm_global"
 
-  # Apply cell type normalization on the entire dataset
+  # Global normalizes the entire dataset first and then does filtering
   global_ctnorm_data <- apply_celltype_normalization(aggregated_data)
 
-  # Create each ablation subset for cluster and gene sets
+  # Filter on cell types and gene types
   for (cell_type in names(CELL_TYPE_SETS)) {
     cluster_ids <- CELL_TYPE_SETS[[cell_type]]
 
-    # Filter by clusters
+    # Filter on cell types
     if (!is.null(cluster_ids)) {
       subset_data <- global_ctnorm_data %>% filter(cluster_ID %in% cluster_ids)
     } else {
+      # Null indicates all cell types as we dont specify a subset
       subset_data <- global_ctnorm_data
     }
 
     for (gene_type in GENE_TYPE_SETS) {
-      # Retrieve the filtered gene set
+      # Filters on metabolic, nonmetabolic or random genes
       all_genes_in_data <- unique(subset_data$gene)
       filtered_genes <- filter_genes_by_type(all_genes_in_data, gene_type)
-
-      # Filter the subset_data based on the filtered gene set
       gene_filtered_data <- subset_data %>% filter(gene %in% filtered_genes)
 
-      # Save total counts before log transformation
+      # Save cell type total counts after normalization for plotting
       save_celltype_total_counts(gene_filtered_data, norm_method_name, cell_type, gene_type)
 
-      # Calculate fold changes before log transformation
+      # Calculate fold changes for this dataset
       calculate_fold_changes_for_normalization(gene_filtered_data, table_s1, annots_list, norm_method_name, cell_type, gene_type)
 
-      # Log1p transformation
+      # Log1p normalization
       log_data <- gene_filtered_data %>% mutate(log_normalized_count = log1p(normalized_count))
 
-      # Optionally z-scale each feature across samples
-      if (zscale) {
-        # Add feature names
-        log_data <- create_features(log_data, annots_list)
-        # Pivot to wide
-        data_wide <- log_data %>%
-          select(sample_ID, gene_cluster, log_normalized_count) %>%
-          pivot_wider(names_from = gene_cluster, values_from = log_normalized_count, values_fill = 0)
-        # Z-scale each feature (column, except sample_ID)
-        feature_cols <- setdiff(colnames(data_wide), "sample_ID")
-        data_wide[feature_cols] <- lapply(data_wide[feature_cols], function(x) as.numeric(scale(x)))
-        # Pivot back to long
-        log_data_z <- data_wide %>%
-          pivot_longer(-sample_ID, names_to = "gene_cluster", values_to = "log_normalized_count")
-        # Add cluster_ID and gene columns back using gene_cluster
-        log_data_z <- log_data_z %>%
-          mutate(
-            gene = sub("@.*", "", gene_cluster),
-            cluster_ID = as.numeric(sub(".*_", "", gene_cluster))
-          )
-        final_data <- log_data_z
-      } else {
-        # Add feature names
-        final_data <- create_features(log_data, annots_list)
-      }
+      # Create feature identifiers
+      final_data <- create_features(log_data, annots_list)
 
-      # Save results
+      # Create the training splits and save the results
       save_results(final_data, norm_method_name, cell_type, gene_type)
     }
   }
 }
 
 
-# Relative normalization approach
+# Applies the relative normalization strategy
 run_relative_approach <- function(umitab_filtered, cell_metadata_final) {
   message("\n RELATIVE NORMALIZATION APPROACH")
 
-  # Iterate over all ablation subsets
+  # Iterate over cell types and gene types
   for (cell_type in names(CELL_TYPE_SETS)) {
     cluster_ids <- CELL_TYPE_SETS[[cell_type]]
     
     for (gene_type in GENE_TYPE_SETS) {
       message(sprintf("Processing %s cell type and %s genes for relative normalization.", cell_type, gene_type))
       
-      # Filter cell metadata by clusters
+      # Filter cell metadata based on cluster IDs
       subset_cell_metadata <- if (!is.null(cluster_ids)) {
         cell_metadata_final %>% filter(cluster_ID %in% cluster_ids)
       } else {
-        # For all_clusters
         cell_metadata_final
       }
       
-      # Filter genes by type using helper function
+      # List of genes we want to retain
       all_genes_in_umitab <- rownames(umitab_filtered)
       filtered_genes <- filter_genes_by_type(all_genes_in_umitab, gene_type)
 
-      # Ensure cells are present in both cell metadata and umitab
+      # List of cells we want to retain
       cells_to_keep_in_subset <- intersect(subset_cell_metadata$cell_ID, colnames(umitab_filtered))
 
-      # Apply the subset filter
+      # Omit all data outside of what we want to retain
       subset_umitab <- umitab_filtered[filtered_genes, cells_to_keep_in_subset, drop = FALSE]
 
-      # Apply Custom CP10K normalization 
+      # Scale all cell counts to the median total counts per cell
       cp_median_data <- apply_cp_median_normalization(subset_umitab, subset_cell_metadata)
 
-      # Apply cell type normalization
+      # Apply cell type normalization to the median normalized data
       relative_ctnorm_data <- apply_celltype_normalization(cp_median_data)
       
-      # Save total counts before log transformation
+      # Save cell type total counts after normalization for plotting
       save_celltype_total_counts(relative_ctnorm_data, "ctnorm_relative", cell_type, gene_type)
       
-      # Calculate fold changes before log transformation
+      # Calculate fold changes for this dataset
       calculate_fold_changes_for_normalization(relative_ctnorm_data, table_s1, annots_list, "ctnorm_relative", cell_type, gene_type)
       
-      # Log1p transformation
+      # Log1p normalization
       log_data <- relative_ctnorm_data %>% mutate(log_normalized_count = log1p(normalized_count))
       
-      # Add feature names
+      # Create feature identifiers
       final_data <- create_features(log_data, annots_list)
       
-      # Save results
+      # Create the training splits and save the results
       save_results(final_data, "ctnorm_relative", cell_type, gene_type)
     }
   }
 }
 
 
-# Read depth normalization approach
+# Runs the read depth normalization approach as baseline
 run_read_depth_approach <- function(aggregated_data) {
   message("\n READ DEPTH NORMALIZATION")
+
+  # Iterate over cell types and gene types
   for (cell_type in names(CELL_TYPE_SETS)) {
     cluster_ids <- CELL_TYPE_SETS[[cell_type]]
     
-    # Filter by cell types first
+    # Filter on cell types
     if (!is.null(cluster_ids)) {
       subset_data <- aggregated_data %>% filter(cluster_ID %in% cluster_ids)
     } else {
+      # Again null indicates we dont filter on cell types so it indicates all clusters
       subset_data <- aggregated_data
     }
     
     for (gene_type in GENE_TYPE_SETS) {
-      # Retrieve the filtered gene set
+      # Filters on metabolic, nonmetabolic or random genes
       all_genes_in_data <- unique(subset_data$gene)
       filtered_genes <- filter_genes_by_type(all_genes_in_data, gene_type)
-
-      # Filter the subset_data based on the filtered gene set
       gene_filtered_data <- subset_data %>% filter(gene %in% filtered_genes)
       
-      # Rename count column to normalized_count for consistency with downstream functions
+      # Rename the count column to normalized_count for consistency (as we dont actually cell type normalize)
       read_depth_data <- gene_filtered_data %>% 
         rename(normalized_count = count)
       
-      # Save total counts before log transformation
+      # Save cell type total counts after normalization for plotting
       save_celltype_total_counts(read_depth_data, "read_depth", cell_type, gene_type)
       
-      # Calculate fold changes before log transformation
+      # Calculate fold changes for this dataset
       calculate_fold_changes_for_normalization(read_depth_data, table_s1, annots_list, "read_depth", cell_type, gene_type)
-        
-      # Log1p transformation
+      
+      # Log1p normalization
       log_data <- read_depth_data %>% mutate(log_normalized_count = log1p(normalized_count))
-        
-      # Add feature names
+
+      # Create feature identifiers
       final_data <- create_features(log_data, annots_list)
         
-      # Save results
+      # Create the training splits and save the results
       save_results(final_data, "read_depth", cell_type, gene_type)
     }
   }
 }
 
 
-# Apply CP10K normalization to the filtered umitab data
+
+# Apply and save CP10K normalization to the filtered umitab data
 cp10k_normalized_umitab <- apply_cp10k_normalization(umitab_filtered)
 
-# Save CP10K normalized matrix to file
+# Save the CP10K normalized data and cell metadata
 output_dir_cp10k <- "output/6. plots/data/cp10k"
 dir.create(output_dir_cp10k, recursive = TRUE, showWarnings = FALSE)
-
-# Save as RDS to preserve sparse matrix format and metadata
 saveRDS(cp10k_normalized_umitab, file.path(output_dir_cp10k, "cp10k_normalized_umitab.rds"))
-
-# Save cell metadata for CP10K normalized data
 write_csv(cell_metadata_final, file.path(output_dir_cp10k, "cell_metadata_final.csv"))
 
-# Convert CP10K normalized data to aggregated format
+# Aggregated version of CP10K normalized data
 aggregated_data <- aggregate_umitab_to_long(cp10k_normalized_umitab, cell_metadata_final)
 
-
-# Run global approach (standard)
-run_global_approach(aggregated_data, zscale = FALSE)
-
-# Run global approach (z-scaled)
-run_global_approach(aggregated_data, zscale = TRUE)
-
-# Run relative approach
-#run_relative_approach(cp10k_normalized_umitab, cell_metadata_final)
-
-# Run read depth normalization approach
-#run_read_depth_approach(aggregated_data)
+# Run normalization strategies
+run_global_approach(aggregated_data)
+run_relative_approach(cp10k_normalized_umitab, cell_metadata_final)
+run_read_depth_approach(aggregated_data)
 
 message("\n Preprocessing pipeline completed.")

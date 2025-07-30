@@ -56,10 +56,10 @@ preprocess_data_svm <- function(X_train_df, X_test_df, y_train_df, y_test_df) {
       f_values[is.na(f_values)] <- 0
 
       if (all(f_values == 0)) {
-        warning("SVM Linear: All ANOVA F-values are zero. Using all features.")
+        warning("SVM Linear: All ANOVA F-values are zero.")
         selected_feature_names_anova <- colnames(X_train_df)
       } else if (sum(f_values > 0) == 0) {
-         warning("SVM Linear: No features with non-zero F-value. Using all features.")
+         warning("SVM Linear: No features with non-zero F-value.")
          selected_feature_names_anova <- colnames(X_train_df)
       } else {
         # Select top features based on F-values

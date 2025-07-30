@@ -2,10 +2,10 @@ library(tidyverse)
 library(pROC)
 library(caret)
 
-# Calculate comprehensive performance metrics for binary classification
+# Calculate performance metrics for binary classification
 calculate_performance_metrics <- function(y_true, y_pred, y_pred_prob) {
   
-  # Create confusion matrix object that contains metrics
+  # Create confusion matrix of caret that has a bunch of useful metrics
   cm <- confusionMatrix(factor(y_pred, levels = c(0, 1)), 
                        factor(y_true, levels = c(0, 1)), 
                        positive = "1")
@@ -14,13 +14,13 @@ calculate_performance_metrics <- function(y_true, y_pred, y_pred_prob) {
   roc_obj <- roc(y_true, y_pred_prob, quiet = TRUE)
   auc_value <- as.numeric(auc(roc_obj))
   
-  # Precision, Recall, F1 extraction from confusion matrix
+  # Precision, recall, f1 extraction from confusion matrix
   precision <- cm$byClass["Pos Pred Value"]
   recall <- cm$byClass["Sensitivity"] 
   specificity <- cm$byClass["Specificity"]
   f1_score <- 2 * (precision * recall) / (precision + recall)
   
-  # Handle na values
+  # Replace missing values with zeros
   precision <- ifelse(is.na(precision), 0, precision)
   recall <- ifelse(is.na(recall), 0, recall)
   specificity <- ifelse(is.na(specificity), 0, specificity)
@@ -30,12 +30,13 @@ calculate_performance_metrics <- function(y_true, y_pred, y_pred_prob) {
   accuracy <- cm$overall["Accuracy"]
   balanced_accuracy <- (recall + specificity) / 2
   
-  # True and false prediction classes
+  # Prediction class counts
   tn <- cm$table[1,1]
   fp <- cm$table[1,2] 
   fn <- cm$table[2,1]
   tp <- cm$table[2,2]
   
+  # Return a dataframe with the metrics
   return(data.frame(
     Accuracy = round(accuracy, 4),
     Precision = round(precision, 4),
@@ -52,31 +53,35 @@ calculate_performance_metrics <- function(y_true, y_pred, y_pred_prob) {
 }
 
 
-# Extract model info from file path structure
+# Retrieves model metadata such as subsetting information
 extract_model_info <- function(file_path) {
   # Extract relative path components
   path_parts <- strsplit(file_path, "[/\\\\]")[[1]]
   
-  # Find the model directory
+  # Find the model based on path
   model_idx <- which(path_parts %in% c("xgboost", "svmrbf", "svmlinear", "spls", 
                                        "randomforest", "lightgbm", "lasso", "elasticnet"))
   
+  # If path contains a model name then extract its data and metadata
   if (length(model_idx) > 0) {
     algorithm <- path_parts[model_idx[1]]
     
-    # Adjust SVM algorithm names for consistency
+    # Adjust SVM names for consistency
     if (algorithm == "svmrbf") algorithm <- "svm_rbf"
     if (algorithm == "svmlinear") algorithm <- "svm_linear"
     
-    # Find 2. models index
+    # Find base models directory
     models_idx <- which(path_parts == "2. models")
     
+    # Given that the model is in a subdirectory of 2. models
     if (length(models_idx) > 0 && model_idx[1] > models_idx[1] + 1) {
-      # Extract path components after "2. models"
+      # Read carefully it is modelS for the top directory where we want to start and model for the low level model directory
       start_idx <- models_idx[1] + 1
       end_idx <- model_idx[1] - 1
       
+      # Make sure the end index is not before the start index
       if (end_idx >= start_idx) {
+        # Get all path parts between models and model directory
         components <- path_parts[start_idx:end_idx]
         
         # Structure is dataset/cell_type/gene_set
@@ -94,6 +99,7 @@ extract_model_info <- function(file_path) {
     }
   }
   
+  # If no model information is found then return unknowns
   return(list(
     algorithm = "unknown", 
     dataset = "unknown",
@@ -105,7 +111,7 @@ extract_model_info <- function(file_path) {
 
 # Main function to generate performance summary
 generate_model_performance_summary <- function() {
-  # Output directory path
+  # Output directory path should not be hardcoded but oopsie
   output_dir <- "c:/Users/mchul/Documents/StrataSign/output/2. models"
   
   # Find all prediction csv files
@@ -114,6 +120,8 @@ generate_model_performance_summary <- function() {
                                 recursive = TRUE, 
                                 full.names = TRUE)
   
+
+  # Throw a hard error if no prediction files found
   if (length(prediction_files) == 0) {
     stop("No prediction files found in the output directory.")
   }
@@ -123,8 +131,6 @@ generate_model_performance_summary <- function() {
   
   # Process each prediction file
   for (pred_file in prediction_files) {
-    message(paste("Processing:", basename(pred_file)))
-    
     tryCatch({
       # Read predictions
       pred_data <- read.csv(pred_file, stringsAsFactors = FALSE)
@@ -147,10 +153,10 @@ generate_model_performance_summary <- function() {
         stringsAsFactors = FALSE
       )
       
-      # Combine with metrics
+      # Combine with metrics by adding columns
       result_row <- cbind(result_row, metrics)
       
-      # Add to results
+      # Add to results by adding as rows
       performance_results <- rbind(performance_results, result_row)
       
     }, error = function(e) {
@@ -158,7 +164,7 @@ generate_model_performance_summary <- function() {
     })
   }
   
-  # Sort results by AUC descending
+  # Sort results by descending AUC and F1 Score
   performance_results <- performance_results %>%
     arrange(desc(AUC), desc(F1_Score))
   
@@ -173,6 +179,5 @@ generate_model_performance_summary <- function() {
 }
 
 
-# === EXECUTE SUMMARY GENERATION ===
-
+# Run the performance summary generation
 generate_model_performance_summary()

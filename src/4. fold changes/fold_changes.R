@@ -1,6 +1,7 @@
+
 # Calculate fold changes for normalized data
 calculate_fold_changes_for_normalization <- function(normalized_data, table_s1, annots_list, method_name, cell_type, gene_type) {
-  # Load feature name utility functions
+  # Load feature name utility functions inside this function because otherwise it wont load in data preprocessing
   source("src/0. utils/feature_name_utils.R")
 
   # Add tissue information from table_s1
@@ -8,15 +9,18 @@ calculate_fold_changes_for_normalization <- function(normalized_data, table_s1, 
     left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID") %>%
     filter(!is.na(tissue))
 
-  # Get all unique sample_IDs for each tissue type
+  # Get all unique sample IDs for each tissue type
   all_tissues <- unique(data_with_tissue$tissue)
+
+  # All samples stratified by tissue type
   all_samples_by_tissue <- lapply(all_tissues, function(t) unique(data_with_tissue$sample_ID[data_with_tissue$tissue == t]))
+  
+  # Set names for the list of samples by tissue
   names(all_samples_by_tissue) <- all_tissues
 
   # Get all unique cluster_IDs and genes
   all_clusters <- unique(data_with_tissue$cluster_ID)
   all_genes <- unique(data_with_tissue$gene)
-
 
   # Create a complete grid of gene, cluster_ID, and sample_ID for each tissue
   complete_data <- bind_rows(lapply(all_tissues, function(tissue_type) {
@@ -29,7 +33,7 @@ calculate_fold_changes_for_normalization <- function(normalized_data, table_s1, 
     )
   }))
 
-  # Fill in zeros for missing combinations
+  # Fill in zeros for missing combinations just to be sure
   data_with_zeros <- complete_data %>%
     left_join(data_with_tissue %>% select(gene, cluster_ID, sample_ID, tissue, normalized_count),
               by = c("gene", "cluster_ID", "sample_ID", "tissue")) %>%
@@ -51,13 +55,14 @@ calculate_fold_changes_for_normalization <- function(normalized_data, table_s1, 
       values_fill = 0
     )
 
-  # Get tissue column names
+  # Set tissue column names
   normal_col <- "Normal"
   tumor_col <- "Tumor"
 
   # Calculate log2 fold changes with pseudocount of 0.0001
   fold_changes <- tissue_means %>%
     mutate(
+      # .data can help get columns dynamically from strings
       normal_mean = .data[[paste0("mean_expr_", normal_col)]],
       tumor_mean = .data[[paste0("mean_expr_", tumor_col)]],
       log2FoldChange = log2((tumor_mean + 0.0001) / (normal_mean + 0.0001)),
@@ -83,15 +88,13 @@ calculate_fold_changes_for_normalization <- function(normalized_data, table_s1, 
   output_dir <- file.path("output", "4. fold changes", method_name, cell_type, gene_type)
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
-
-
   # Save main results with Feature and Value columns
   main_results <- fold_changes_with_features %>%
     select(Feature, Value)
   output_path <- file.path(output_dir, "fold_changes.csv")
   write_csv(main_results, output_path)
 
-  # Save detailed results with all information
+  # Also save detailed results with all information
   detailed_output_path <- file.path(output_dir, "detailed_fold_changes.csv")
   detailed_results_lower <- fold_changes_with_features
   names(detailed_results_lower) <- tolower(names(detailed_results_lower))

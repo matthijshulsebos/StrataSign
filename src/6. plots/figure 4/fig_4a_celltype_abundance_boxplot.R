@@ -5,16 +5,14 @@ library(Matrix)
 library(ggpubr)
 
 
-# Configuration
-output_figure_dir <- "output/6. plots/figure 3"
-output_plot_name <- "fig_3a.png"
+# Output directory for figure 4 abundance
+output_figure_dir <- "output/6. plots/figure 4"
+output_plot_name <- "fig_4a.png"
 
-# Load cell metadata from cp10k
 cell_metadata_final <- read_csv("output/6. plots/data/cp10k/cell_metadata_final.csv", show_col_types = FALSE)
 table_s1 <- read_csv("base/input_tables/table_s1_sample_table.csv", show_col_types = FALSE) %>% mutate(sample_ID = as.character(sample_ID))
 annots_list <- read_csv("base/input_tables/annots_list.csv", show_col_types = FALSE)
 
-# Create output directory
 dir.create(output_figure_dir, recursive = TRUE, showWarnings = FALSE)
 output_plot_path <- file.path(output_figure_dir, output_plot_name)
 
@@ -29,11 +27,11 @@ cell_counts <- cell_metadata_final %>%
   summarise(cell_count = n(), .groups = 'drop') %>%
   mutate(sample_ID = as.character(sample_ID))
 
-# Add tissue information for plotting
+# Add tissue information
 cell_counts <- cell_counts %>%
   left_join(table_s1 %>% select(sample_ID, tissue), by = "sample_ID")
 
-# Create the boxplot (per sample)
+# Create the boxplot per sample and cell type
 p <- ggplot(cell_counts, aes(x = celltype, y = cell_count)) +
   geom_boxplot(aes(fill = tissue), alpha = 0.7, width = 0.6) + 
   scale_y_log10(labels = scales::comma_format()) +
@@ -51,11 +49,13 @@ p <- ggplot(cell_counts, aes(x = celltype, y = cell_count)) +
     axis.title.y = element_text(size = 12, color = "black"),
     legend.position = "none",
     strip.text = element_text(color = "black", face = "bold"),
-    strip.background = element_rect(fill = "white", color = "black")
+    strip.background = element_rect(fill = "transparent", color = "black"),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background = element_rect(fill = "transparent", color = NA)
   ) +
   scale_fill_manual(values = c("Normal" = "#56B4E9", "Tumor" = "#E69F00"))
 
-# Save the plot
-ggsave(output_plot_path, plot = p, width = 12, height = 6, dpi = 300)
+# Save the plot with transparent background
+ggsave(output_plot_path, plot = p, width = 12, height = 6, dpi = 300, bg = "transparent")
 
-message("Completed writing figure 2A to file.")
+message("Completed writing figure 4A abundance boxplot to file.")

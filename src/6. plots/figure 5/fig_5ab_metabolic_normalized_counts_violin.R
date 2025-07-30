@@ -6,7 +6,7 @@ library(ggpubr)
 # Set basic variables
 cell_type_set <- "all_clusters"
 gene_type <- "metabolic"
-output_figure_dir <- "output/6. plots/figure 4"
+output_figure_dir <- "output/6. plots/figure 5"
 
 # Counts data path
 base_dir <- file.path("output", "6. plots", "data", "cell_type_norm_counts", gene_type, cell_type_set)
@@ -79,11 +79,11 @@ create_violin_plot <- function(data, title, output_name, reference_line_value = 
       axis.title.x = element_blank(),
       axis.title.y = element_text(size = 12, color = "black"),
       panel.grid.minor = element_blank(),
-      panel.background = element_rect(fill = "white", color = NA),
-      plot.background = element_rect(fill = "white", color = NA),
+      panel.background = element_rect(fill = "transparent", color = NA),
+      plot.background = element_rect(fill = "transparent", color = NA),
       legend.position = "none",
       strip.text = element_text(color = "black", face = "bold"),
-      strip.background = element_rect(fill = "white", color = "black")
+      strip.background = element_rect(fill = "transparent", color = "black")
     )
 
   # If we pass the relative normalization value then plot the horizontal line
@@ -94,7 +94,7 @@ create_violin_plot <- function(data, title, output_name, reference_line_value = 
 
   # Save the plot
   output_path <- file.path(output_figure_dir, paste0(output_name, ".png"))
-  ggsave(output_path, plot = p, width = 12, height = 6, dpi = 300)
+  ggsave(output_path, plot = p, width = 12, height = 6, dpi = 300, bg = "transparent")
 
   return(p)
 }
@@ -111,14 +111,14 @@ relative_norm_value <- unique(relative_norm_data$log_total_count)[1]
 fig_4a <- create_violin_plot(
   read_depth_data, 
   "Metabolic gene expression",
-  "fig_4a_read_depth_violin"
+  "fig_5a_read_depth_violin"
 )
 
 fig_4b <- create_violin_plot(
   global_norm_data, 
   "Metabolic gene expression",
-  "fig_4b_global_norm_violin",
+  "fig_5b_global_norm_violin",
   relative_norm_value
 )
 
-message(paste("Completed writing 4A and 4B to file."))
+message(paste("Completed writing 5AB to file."))

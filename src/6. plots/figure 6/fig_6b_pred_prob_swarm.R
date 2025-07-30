@@ -23,6 +23,7 @@ clean_model_name <- function(x) {
 
 # Main plotting function
 plot_probability_swarm <- function(norm, cell_type, gene_type) {
+  # Find all prediction files for combination
   pred_files <- list.files(
     path = file.path("output/2. models", norm, cell_type, gene_type),
     pattern = "predictions_.*.csv$",
@@ -35,11 +36,12 @@ plot_probability_swarm <- function(norm, cell_type, gene_type) {
     return(NULL)
   }
 
-  # Read all prediction files and extract y_pred_prob, color by y_test (0=Normal, 1=Tumor)
+  # Read all prediction files
   prob_df <- map_dfr(pred_files, function(f) {
     model <- basename(dirname(f))
     dat <- read_csv(f, show_col_types = FALSE)
-    # y_test: 0=Normal, 1=Tumor
+
+    # Only for test files of course
     if ("y_test" %in% names(dat)) {
       tissue <- ifelse(dat$y_test == 0, "Normal",
                        ifelse(dat$y_test == 1, "Tumor", as.character(dat$y_test)))
@@ -74,15 +76,15 @@ plot_probability_swarm <- function(norm, cell_type, gene_type) {
     theme(legend.position = "right") +
     scale_x_discrete(expand = expansion(add = 0.5))
 
-  # Save all to s5 pred_prob_swarm directory in subdirectories by norm/cell_type/gene_type
-  s5_swarm_root <- "output/6. plots/figure s5/pred_prob_swarm"
+  # Save all to figure 6 swarm directory in subdirectories
+  swarm_root <- "output/6. plots/figure 6/swarm"
   safe_norm <- gsub("[^a-zA-Z0-9_]+", "_", norm)
   safe_celltype <- gsub("[^a-zA-Z0-9_]+", "_", cell_type)
   safe_genetype <- gsub("[^a-zA-Z0-9_]+", "_", gene_type)
-  combo_dir <- file.path(s5_swarm_root, safe_norm, safe_celltype, safe_genetype)
+  combo_dir <- file.path(swarm_root, safe_norm, safe_celltype, safe_genetype)
   dir.create(combo_dir, recursive = TRUE, showWarnings = FALSE)
-  s5_swarm_file <- file.path(combo_dir, "probability_swarm.png")
-  ggsave(s5_swarm_file, plt, width=8, height=6)
+  swarm_file <- file.path(combo_dir, "probability_swarm.png")
+  ggsave(swarm_file, plt, width=8, height=6, bg = "transparent")
 
   return(plt)
 }
@@ -103,11 +105,13 @@ swarm_plot_theme <- theme_bw(base_size = 16, base_family = "sans") +
     legend.direction = "vertical",
     legend.background = element_rect(color = NA, fill = NA),
     legend.box.background = element_blank(),
-    strip.text = element_text(color = "black", face = "bold")
+    strip.text = element_text(color = "black", face = "bold"),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background = element_rect(fill = "transparent", color = NA)
   )
 
 # Define combination components
-norms <- c("ctnorm_global", "ctnorm_global_zscaled", "ctnorm_relative", "read_depth")
+norms <- c("ctnorm_global", "ctnorm_relative", "read_depth")
 cell_types <- c("all_clusters", "lcam_both", "lcam_lo", "lcam_hi", "macrophages")
 gene_types <- c("metabolic", "nonmetabolic", "random")
 

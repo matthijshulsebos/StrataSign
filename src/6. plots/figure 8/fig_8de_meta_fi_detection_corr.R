@@ -56,11 +56,10 @@ create_and_save_sublineage_heatmaps_full <- function(meta_scores, fold_changes, 
   combos <- unique(meta_scores[, c("sublineage", "cluster_ID")])
   combos <- combos[!is.na(combos$sublineage) & !is.na(combos$cluster_ID), ]
   # Use a subdirectory structure for each combination
-  outdir_s7 <- file.path(
-    "output/6. plots/figure s7/detection_correlation",
-    norm, cell_type, gene_set
-  )
-  dir.create(outdir_s7, recursive = TRUE, showWarnings = FALSE)
+  # Save to output/6. plots/figure 8/meta_correlations/<norm>/<cell_type>/<gene_set>/
+  meta_corr_root <- file.path("output/6. plots/figure 8/meta_correlations")
+  outdir_fig8 <- file.path(meta_corr_root, norm, cell_type, gene_set)
+  dir.create(outdir_fig8, recursive = TRUE, showWarnings = FALSE)
   for (i in seq_len(nrow(combos))) {
 
     sub <- combos$sublineage[i]
@@ -123,7 +122,11 @@ create_and_save_sublineage_heatmaps_full <- function(meta_scores, fold_changes, 
     sub_title <- paste0("Sublineage: ", sub, " (", clust, ")")
     p_cor <- ggplot(cor_df, aes(x = Var1, y = Var2, fill = Correlation)) +
       geom_tile(color = "white", width = 0.95, height = 0.95) +
-      scale_fill_viridis_c(option = "C", limits = c(-1, 1)) +
+      scale_fill_viridis_c(
+        option = "C",
+        limits = c(-1, 1),
+        guide = guide_colorbar(background = element_rect(fill = "transparent", color = NA))
+      ) +
       geom_text(aes(label = sprintf("%.2f", Correlation)), color = "black", size = 4, family = "sans") +
       labs(x = NULL, y = NULL, fill = "Pearson r", title = sub_title) +
       theme_bw(base_size = 16, base_family = "sans") +
@@ -137,18 +140,21 @@ create_and_save_sublineage_heatmaps_full <- function(meta_scores, fold_changes, 
         legend.text = element_text(color = "black"),
         legend.key.height = unit(1.5, "cm"),
         legend.key.width = unit(0.7, "cm"),
-        strip.text = element_text(color = "black", face = "bold")
+        strip.text = element_text(color = "black", face = "bold"),
+        panel.background = element_rect(fill = "transparent", color = NA),
+        plot.background = element_rect(fill = "transparent", color = NA),
+        legend.background = element_rect(fill = "transparent", color = NA),
+        legend.box.background = element_rect(fill = "transparent", color = NA),
+        legend.key = element_rect(fill = "transparent", color = NA)
       )
     safe_sub <- gsub("[^a-zA-Z0-9]+", "_", paste0(sub, "_", clust))
-    ggsave(file.path(outdir_s7, paste0("detection_correlation_", safe_sub, ".png")), p_cor, width = 11, height = 8, dpi = 300)
+    ggsave(file.path(outdir_fig8, paste0("detection_correlation_", safe_sub, ".png")), p_cor, width = 11, height = 8, dpi = 300, bg = "transparent")
   }
 }
 
 
-
-
 # === ITERATE OVER ALL COMBINATIONS WITH NESTED FOR LOOPS ===
-norms <- c("ctnorm_global", "ctnorm_global_zscaled", "ctnorm_relative", "read_depth")
+norms <- c("ctnorm_global", "ctnorm_relative", "read_depth")
 cell_types <- c("all_clusters", "macrophages", "lcam_hi", "lcam_lo", "lcam_both")
 gene_sets <- c("metabolic", "nonmetabolic", "random")
 

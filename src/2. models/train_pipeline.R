@@ -1,6 +1,5 @@
 library(yaml)
 
-
 # Base path of the training datasets
 BASE_DATA_PATH <- file.path("output", "1. data preprocessing", "training datasets")
 
@@ -13,8 +12,6 @@ config_path <- file.path("src", "2. models", "config.yaml")
 # Read config into a list
 config <- yaml::read_yaml(config_path)
 
-
-# === HELPER FUNCTIONS ===
 
 # Extract names of true flags from config list
 extract_active_items <- function(config_list, item_name) {
@@ -270,8 +267,6 @@ run_training_pipeline <- function(config_obj) {
   }
 }
 
-
-# === EXECUTE PIPELINE ===
 
 # Run the training pipeline
 run_training_pipeline(

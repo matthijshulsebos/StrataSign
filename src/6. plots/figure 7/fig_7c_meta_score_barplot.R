@@ -4,13 +4,11 @@ library(readr)
 source("src/0. utils/feature_name_utils.R")
 
 # Define combinations
-norms <- c("ctnorm_global", "ctnorm_global_zscaled", "ctnorm_relative", "read_depth")
+norms <- c("ctnorm_global", "ctnorm_relative", "read_depth")
 cell_types <- c("all_clusters", "macrophages", "lcam_hi", "lcam_lo", "lcam_both")
 gene_sets <- c("metabolic", "nonmetabolic", "random")
 
-
-
-# Load sublineage color mapping (directly from 3. intersector)
+# Load sublineage color mapping
 sublineage_color_map_path <- "output/3. intersector/sublineage_colors.rds"
 sublineage_colors <- readRDS(sublineage_color_map_path)
 sublineage_colors_plot <- sublineage_colors
@@ -27,16 +25,17 @@ for (norm in norms) {
         arrange(desc(meta_score)) %>%
         head(60)
 
-      # Use feature_name_utils to extract gene and cluster_id
+      # Use utils to extract gene and cluster_id
       parsed_features <- parse_feature_identifier(top_features_data$feature_id)
       top_features_data$gene <- parsed_features$gene
-      # Use get_simplified_sublineage from feature_name_utils.R for sublineage extraction
+
+      # Use get_simplified_sublineage from utils
       top_features_data$sublineage <- get_simplified_sublineage(top_features_data$feature_id)
 
-      # Format display_name as gene@sublineage + arrow
       # Also extract cluster_id for display
       top_features_data$cluster_id <- parsed_features$cluster_id
 
+      # Display name with fold change direction
       top_features_data <- top_features_data %>%
         mutate(
           display_name = paste0(
@@ -46,7 +45,7 @@ for (norm in norms) {
           n_models_occur_f = as.factor(n_models_occur)
         )
 
-      # Plot in chunks of 15 (or less for the last chunk)
+      # Plot in chunks of 15 or less for the last chunk
       chunk_size <- 15
       n_chunks <- ceiling(nrow(top_features_data) / chunk_size)
       for (chunk in seq_len(n_chunks)) {
@@ -84,16 +83,22 @@ for (norm in norms) {
             axis.line.x = element_line(color = "black", size = 0.8),
             axis.line.y = element_line(color = "black", size = 0.8),
             plot.margin = margin(10, 15, 10, 10, "pt"),
-            strip.text = element_text(color = "black", face = "bold")
+            strip.text = element_text(color = "black", face = "bold"),
+            panel.background = element_rect(fill = "transparent", color = NA),
+            plot.background = element_rect(fill = "transparent", color = NA)
           )
-        # Save to figure s6/feature_barplots/<norm>/<cell_type>/<gene_set>/barplot_chunk<N>.png
+
+        # Safe names
         safe_norm <- gsub("[^a-zA-Z0-9_]+", "_", norm)
         safe_celltype <- gsub("[^a-zA-Z0-9_]+", "_", cell_type)
         safe_geneset <- gsub("[^a-zA-Z0-9_]+", "_", gene_set)
-        combo_dir <- file.path("output/6. plots/figure s6/feature_barplots", safe_norm, safe_celltype, safe_geneset)
+
+        # Save to figure
+        top_scores_root <- file.path("output/6. plots/figure 7/top_scores")
+        combo_dir <- file.path(top_scores_root, safe_norm, safe_celltype, safe_geneset)
         dir.create(combo_dir, recursive = TRUE, showWarnings = FALSE)
         fname <- sprintf("barplot_chunk%d.png", chunk)
-        ggsave(file.path(combo_dir, fname), plot = p, width = 8, height = 6, dpi = 300, units = "in", bg = "white", limitsize = FALSE)
+        ggsave(file.path(combo_dir, fname), plot = p, width = 8, height = 6, dpi = 300, units = "in", bg = "transparent", limitsize = FALSE)
       }
     }
   }

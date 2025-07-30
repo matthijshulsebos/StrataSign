@@ -6,8 +6,8 @@ library(ggpubr)
 
 
 # Configuration
-output_figure_dir <- "output/6. plots/figure 3"
-output_plot_name <- "fig_3b.png"
+output_figure_dir <- "output/6. plots/figure 4"
+output_plot_name <- "fig_4b.png"
 
 # Load cp10k normalized umitab and metadata
 umitab_filtered <- readRDS("output/6. plots/data/cp10k/cp10k_normalized_umitab.rds")
@@ -106,13 +106,15 @@ p <- ggplot(patient_celltype_metabolic, aes(x = cell_type, y = metabolic_proport
     axis.title.y = element_text(size = 12, color = "black"),
     legend.position = "none",
     strip.text = element_text(color = "black", face = "bold"),
-    strip.background = element_rect(fill = "white", color = "black")
+    strip.background = element_rect(fill = "transparent", color = "black"),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background = element_rect(fill = "transparent", color = NA)
   ) +
   scale_fill_manual(values = c("Normal" = "#56B4E9", "Tumor" = "#E69F00")) +
   scale_y_continuous(labels = scales::percent_format(accuracy = 0.1))
 
-# Save plot
-ggsave(output_plot_path, plot = p, width = 12, height = 6, dpi = 300)
+# Save plot with transparent background
+ggsave(output_plot_path, plot = p, width = 12, height = 6, dpi = 300, bg = "transparent")
 
 # Create and save a separate legend for tissue type
 legend_plot <- ggplot(patient_celltype_metabolic, aes(x = cell_type, y = metabolic_proportion)) +
@@ -121,7 +123,9 @@ legend_plot <- ggplot(patient_celltype_metabolic, aes(x = cell_type, y = metabol
   theme_void() +
   theme(
     legend.position = "right",
-    legend.background = element_rect(fill = "white", color = NA),
+    legend.background = element_rect(fill = "transparent", color = NA),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    plot.background = element_rect(fill = "transparent", color = NA),
     legend.title = element_text(size = 8),
     legend.text = element_text(size = 8)
   ) +
@@ -131,7 +135,7 @@ legend_plot <- ggplot(patient_celltype_metabolic, aes(x = cell_type, y = metabol
 legend_grob <- get_legend(legend_plot)
 
 # Save the legend as a separate file
-legend_output_path <- file.path(output_figure_dir, "fig_3_shared_tissue_legend.png")
-ggsave(legend_output_path, legend_grob, width = 1, height = 0.8, dpi = 300)
+legend_output_path <- file.path(output_figure_dir, "fig_4_shared_tissue_legend.png")
+ggsave(legend_output_path, legend_grob, width = 1, height = 0.8, dpi = 300, bg = "transparent")
 
-message("Completed writing figure 3B to file.")
+message("Completed writing figure 4B metabolic proportion boxplot to file.")

@@ -2,9 +2,7 @@ library(dplyr)
 library(ggplot2)
 library(readr)
 library(purrr)
-library(ggrepel) # Add ggrepel library
-# library(viridis) # No longer strictly needed
-# library(RColorBrewer) # No longer strictly needed
+library(ggrepel)
 
 # Source utility functions
 source("src/0. utils/feature_name_utils.R")
@@ -41,7 +39,7 @@ create_and_save_volcano <- function(data, x_var, x_label, cutoff_val, file_path)
     geom_hline(yintercept = meta_score_cutoff, linetype = "dashed", color = "red", alpha = 0.7) +
     annotate(
       "text",
-      x = -Inf, y = meta_score_cutoff, hjust = -0.1, vjust = -0.5, size = 4, color = "red",
+      x = -Inf, y = meta_score_cutoff, hjust = -0.1, vjust = -0.5, size = 4, color = "black",
       label = sprintf("100th highest meta-score = %.2f", meta_score_cutoff)
     ) +
     geom_vline(xintercept = c(-cutoff_val, cutoff_val), linetype = "dashed", color = "grey40") +
@@ -78,15 +76,18 @@ create_and_save_volcano <- function(data, x_var, x_label, cutoff_val, file_path)
     theme_bw(base_size = 16, base_family = "sans") +
     theme(
       legend.position = "right",
-      legend.background = element_blank(),
-      legend.key = element_rect(fill = "white", color = NA),
+      legend.background = element_rect(fill = "transparent", color = NA),
+      legend.box.background = element_rect(fill = "transparent", color = NA),
+      legend.key = element_rect(fill = "transparent", color = NA),
       legend.margin = margin(8, 8, 8, 8),
       panel.grid.minor = element_blank(),
       plot.title = element_text(color = "black"),
       axis.title = element_text(color = "black"),
       axis.text = element_text(color = "black"),
       legend.title = element_text(color = "black"),
-      legend.text = element_text(color = "black")
+      legend.text = element_text(color = "black"),
+      panel.background = element_rect(fill = "transparent", color = NA),
+      plot.background = element_rect(fill = "transparent", color = NA)
     ) +
     guides(
       color = guide_legend(title = "Significance", override.aes = list(size = 3, alpha = 1))
@@ -94,12 +95,12 @@ create_and_save_volcano <- function(data, x_var, x_label, cutoff_val, file_path)
 
   # Ensure directory exists and save the plot
   if (!dir.exists(dirname(file_path))) dir.create(dirname(file_path), recursive = TRUE)
-  ggsave(file_path, p, width = 12, height = 8, dpi = 300, bg = "white")
+  ggsave(file_path, p, width = 12, height = 8, dpi = 300, bg = "transparent")
 }
 
 
 # Define all combinations to plot
-norms <- c("ctnorm_global", "ctnorm_global_zscaled", "ctnorm_relative", "read_depth")
+norms <- c("ctnorm_global", "ctnorm_relative", "read_depth")
 cell_types <- c("all_clusters", "macrophages", "lcam_hi", "lcam_lo", "lcam_both")
 gene_sets <- c("metabolic", "nonmetabolic", "random")
 
@@ -112,7 +113,10 @@ for (norm in norms) {
     for (gene_set in gene_sets) {
       meta_scores_file <- file.path("output/3. intersector", norm, cell_type, gene_set, "meta_scores.csv")
       fc_file <- file.path("output/4. fold changes", norm, cell_type, gene_set, "fold_changes.csv")
-      if (!file.exists(meta_scores_file) || !file.exists(fc_file)) next
+      if (!file.exists(meta_scores_file) || !file.exists(fc_file)) {
+        message(sprintf("Missing file for: norm=%s, cell_type=%s, gene_set=%s", norm, cell_type, gene_set))
+        next
+      }
       meta_scores <- read_csv(meta_scores_file, show_col_types = FALSE)
       fc <- read_csv(fc_file, show_col_types = FALSE)
       combined_data <- meta_scores %>%
@@ -122,10 +126,14 @@ for (norm in norms) {
           gene = get_gene_from_feature(feature_id),
           sublineage = get_simplified_sublineage(feature_id)
         )
-      # Filter to metabolic genes only for consistency with previous behavior
-      combined_data <- combined_data %>%
-        filter(gene %in% hsa01100_genes$Symbol) %>%
-        mutate(gene_type = "Metabolic")
+
+      # Only filter to metabolic genes for the metabolic gene set
+      if (gene_set == "metabolic") {
+        combined_data <- combined_data %>%
+          filter(gene %in% hsa01100_genes$Symbol) %>%
+          mutate(gene_type = "Metabolic")
+      }
+
       # Filter out extreme fold changes and detection differences
       combined_data <- combined_data %>% 
         filter(abs(log2_fold_change) < 10) %>%
@@ -141,8 +149,8 @@ for (norm in norms) {
       meta_score_vec <- combined_data %>% arrange(desc(meta_score)) %>% pull(meta_score)
       meta_score_cutoff <- if (length(meta_score_vec) >= 100) meta_score_vec[100] else utils::tail(meta_score_vec, 1)
       
-      # --- Generate and Save Fold Change Volcano Plot ---
-      fc_volcano_dir <- file.path("output/6. plots/figure s8/fold_change_volcano", norm, cell_type, gene_set)
+      # Generate and save the fold change volcano plot
+      fc_volcano_dir <- file.path("output/6. plots/figure 9/fold_change_volcano", norm, cell_type, gene_set)
       fc_volcano_path <- file.path(fc_volcano_dir, sprintf("volcano_fc_%s_%s_%s.png", norm, cell_type, gene_set))
       create_and_save_volcano(
         data = combined_data,
@@ -152,14 +160,15 @@ for (norm in norms) {
         file_path = fc_volcano_path
       )
 
-      # --- Generate and Save Detection Difference Volcano Plot ---
-      dd_volcano_dir <- file.path("output/6. plots/figure s8/detection_diff_volcano", norm, cell_type, gene_set)
+      # Generate and save the detection difference volcano plot
+      dd_volcano_dir <- file.path("output/6. plots/figure 9/detection_diff_volcano", norm, cell_type, gene_set)
       dd_volcano_path <- file.path(dd_volcano_dir, sprintf("volcano_dd_%s_%s_%s.png", norm, cell_type, gene_set))
       create_and_save_volcano(
         data = combined_data,
         x_var = "det_diff",
         x_label = "Detection Difference (tumor - normal)",
-        cutoff_val = 0.25, # Using 25% as the significance cutoff for detection difference
+         # Using 25% as the significance cutoff for detection difference
+        cutoff_val = 0.25,
         file_path = dd_volcano_path
       )
     }

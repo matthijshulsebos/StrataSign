@@ -35,17 +35,17 @@ load_model_performance <- function(file_path = "output/2. models/model_performan
 }
 
 
-# Save barplots for all combinations in figure s5 with subdirectories for normalization, cell type, gene set (in that order)
+# Save barplots for all combinations
 save_all_performance_barplots <- function(perf_data, 
                                           metrics_to_plot = c("AUC", "Accuracy", "F1_Score", "Precision", "Recall", "Balanced_Accuracy", "Specificity", "MCC")) {
-  # Use raw (uncleaned) values for iteration
+  # Use raw values for iteration
   raw_datasets <- unique(perf_data$Dataset)
   raw_cell_types <- unique(perf_data$Cell_Type)
   raw_gene_sets <- unique(perf_data$Gene_Set)
 
-  # Output root for figure s5
-  s5_metrics_root <- file.path("output/6. plots/figure s5/performance")
-  dir.create(s5_metrics_root, recursive = TRUE, showWarnings = FALSE)
+  # Output root for figure 6
+  performance_root <- file.path("output/6. plots/figure 6/performance")
+  dir.create(performance_root, recursive = TRUE, showWarnings = FALSE)
 
   for (dataset in raw_datasets) {
     for (cell_type in raw_cell_types) {
@@ -54,7 +54,7 @@ save_all_performance_barplots <- function(perf_data,
           filter(Dataset == dataset, Cell_Type == cell_type, Gene_Set == gene_set)
         if (nrow(filtered_data) == 0) next
 
-        # Order models alphabetically (descending)
+        # Order models alphabetically
         model_order <- sort(unique(filtered_data$Model), decreasing = TRUE)
         filtered_data <- filtered_data %>% mutate(Model = factor(Model, levels = model_order))
 
@@ -99,24 +99,23 @@ save_all_performance_barplots <- function(perf_data,
               title = sprintf("%s\n%s | %s | %s", metric, dataset, cell_type, gene_set)
             )
 
-          # Directory for this combination: figure s5/performance/<norm>/<cell_type>/<gene_set>/
+          # Directory for this combination
           safe_dataset <- gsub("[^a-zA-Z0-9_]+", "_", dataset)
           safe_celltype <- gsub("[^a-zA-Z0-9_]+", "_", cell_type)
           safe_geneset <- gsub("[^a-zA-Z0-9_]+", "_", gene_set)
-          combo_dir <- file.path(s5_metrics_root, safe_dataset, safe_celltype, safe_geneset)
+          combo_dir <- file.path(performance_root, safe_dataset, safe_celltype, safe_geneset)
           dir.create(combo_dir, recursive = TRUE, showWarnings = FALSE)
           metric_file <- file.path(combo_dir, sprintf("barplot_%s.png", metric))
-          ggsave(metric_file, p_metric, width = 8, height = 5, dpi = 300)
+          ggsave(metric_file, p_metric, width = 8, height = 5, dpi = 300, bg = "transparent")
         }
       }
     }
   }
-  message("Completed writing figure 5CDE to file.")
+  message("Completed writing figure 6CDE to file.")
 }
 
 
 # Main function
-# Iterate over all datasets in the file, not just a focused one
 generate_performance_plots <- function(performance_file = "output/2. models/model_performance.csv") {
   # Use relative paths
   if (!file.exists(performance_file) && !startsWith(performance_file, "/") && !grepl("^[A-Za-z]:", performance_file)) {

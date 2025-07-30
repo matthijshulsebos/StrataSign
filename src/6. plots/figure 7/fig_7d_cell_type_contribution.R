@@ -9,13 +9,13 @@ sublineage_colors <- readRDS(sublineage_color_map_path)
 
 # Define all combinations to plot
 combinations <- expand.grid(
-  normalization_method = c("ctnorm_global", "ctnorm_global_zscaled", "ctnorm_relative", "read_depth"),
+  normalization_method = c("ctnorm_global", "ctnorm_relative", "read_depth"),
   meta_celltype_set = c("all_clusters", "macrophages", "lcam_hi", "lcam_lo", "lcam_both"),
   gene_type = c("metabolic", "nonmetabolic", "random"),
   stringsAsFactors = FALSE
 )
 
-# Add a column for output type (figure5 or s2)
+# Add a column for output type
 combinations$output_type <- ifelse(
   combinations$normalization_method == "ctnorm_global" &
     combinations$meta_celltype_set == "all_clusters" &
@@ -23,7 +23,7 @@ combinations$output_type <- ifelse(
   "figure5", "s2"
 )
 
-for (norm in c("ctnorm_global", "ctnorm_global_zscaled", "ctnorm_relative", "read_depth")) {
+for (norm in c("ctnorm_global", "ctnorm_relative", "read_depth")) {
   for (celltype in c("all_clusters", "macrophages", "lcam_hi", "lcam_lo", "lcam_both")) {
     for (gene_set in c("metabolic", "nonmetabolic", "random")) {
       meta_scores_file <- file.path(
@@ -63,14 +63,17 @@ for (norm in c("ctnorm_global", "ctnorm_global_zscaled", "ctnorm_relative", "rea
           legend.position = "none", 
           plot.title = element_blank(), 
           plot.subtitle = element_blank(),
-          strip.text = element_text(color = "black", face = "bold")
-          )
+          strip.text = element_text(color = "black", face = "bold"),
+          panel.background = element_rect(fill = "transparent", color = NA),
+          plot.background = element_rect(fill = "transparent", color = NA)
+        )
 
-      # Save to s6/feature_contribution/<norm>/<celltype>/<gene_set>/celltype_contribution_<norm>_<celltype>_<gene_set>.png
-      s6_base <- file.path("output/6. plots/figure s6/feature_contribution", norm, celltype, gene_set)
-      if (!dir.exists(s6_base)) dir.create(s6_base, recursive = TRUE)
-      s6_name <- file.path(s6_base, sprintf("celltype_contribution_%s_%s_%s.png", norm, celltype, gene_set))
-      ggsave(s6_name, p, width = 7, height = 5, dpi = 300)
+      # Save to figure 7
+      type_treemap_root <- file.path("output/6. plots/figure 7/type_treemap")
+      combo_dir <- file.path(type_treemap_root, norm, celltype, gene_set)
+      if (!dir.exists(combo_dir)) dir.create(combo_dir, recursive = TRUE)
+      out_name <- file.path(combo_dir, sprintf("celltype_contribution_%s_%s_%s.png", norm, celltype, gene_set))
+      ggsave(out_name, p, width = 7, height = 5, dpi = 300, bg = "transparent")
     }
   }
 }

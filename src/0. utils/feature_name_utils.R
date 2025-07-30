@@ -1,45 +1,53 @@
-# Creates a feature identifier gene@cluster_name_part_cluster_id
+
+# Combines gene and cluster components into a feature identifier
 create_feature_identifier <- function(gene, cluster_name_part, cluster_id_numeric) {
-  # Input type validation
+  # Check for data types of components
   if (!is.character(gene) || !is.character(cluster_name_part) || !is.numeric(cluster_id_numeric)) {
-    stop("Inputs must be: character, character, numeric.")
+    stop("Inputs must be char, char, num.")
   }
-  # Combine cluster name part and ID
+  
+  # Create the features identifier string by combining
   cluster_identifier_string <- paste(cluster_name_part, cluster_id_numeric, sep = "_")
-  # Combine gene with the full cluster identifier
   feature_name <- paste(gene, cluster_identifier_string, sep = "@")
+
   return(feature_name)
 }
 
-# Parses feature identifiers and returns gene, cluster_string, cluster_name, cluster_id
+
+# Deconstructs feature identifiers into their components
 parse_feature_identifier <- function(feature_identifiers) {
+  # Apply the following to all feature identifiers in the input vector
   results <- lapply(feature_identifiers, function(fi_original) {
     fi <- fi_original
 
-    # Init vars
-    gene_val <- NA_character_
-    full_cluster_string_val <- NA_character_
-    cluster_name_part_val <- NA_character_
-    cluster_id_val <- NA_real_
+    # Init variables
+    gene_val <- NA
+    full_cluster_string_val <- NA
+    cluster_name_part_val <- NA
+    cluster_id_val <- NA
 
-    # Check that feature contains @
+    # Check that feature contains @ for gene and cluster split
     if (is.character(fi) && !is.na(fi) && grepl("@", fi, fixed = TRUE)) {
       parts <- strsplit(fi, "@", fixed = TRUE)[[1]]
-      # Check for gene and cluster_string
+
+      # First part of split is gene and second is cluster string
       if (length(parts) == 2) {
         gene_val <- parts[1]
         full_cluster_string_val <- parts[2]
 
-        # Process the cluster string
         if (nchar(full_cluster_string_val) > 0) {
-          # Regex to find name and a ID
+          # Regex to find name and a ID by checking if there is a number after underscore
           match_data <- regexec("^(.*?)_(\\d+)$", full_cluster_string_val)
+
+          # If regex match is successful
           if (match_data[[1]][1] != -1) {
+            # Get all part of the match
             extracted_parts <- regmatches(full_cluster_string_val, match_data)[[1]]
+            # Part is the cluster name and the second is the cluster ID
             cluster_name_part_val <- extracted_parts[2] 
             cluster_id_val <- as.numeric(extracted_parts[3])
           } else {
-            # Default to entire cluster string if no ID found
+            # Fall back on entire cluster string if no cluster ID is found
             cluster_name_part_val <- full_cluster_string_val
           }
         } else { 
@@ -49,7 +57,7 @@ parse_feature_identifier <- function(feature_identifiers) {
       }
     }
     
-    # Return a data frame row for each input identifier
+    # Return all the components as a dataframe
     return(data.frame(
       feature_identifier = fi_original,
       gene = gene_val,
@@ -60,62 +68,68 @@ parse_feature_identifier <- function(feature_identifiers) {
     ))
   })
   
-  # Combine all rows into a data frame
+  # Combine all parsed feature identifier rows into a data frame
   do.call(rbind, results)
 }
 
 
-# Extracts gene name from feature identifier
+# Extracts gene from feature identifier
 get_gene_from_feature <- function(feature_identifier) {
+  # Apply this function to each feature identifier in input list
   sapply(feature_identifier, function(fi) {
-    # Basic validation and check for @
-    if (!is.character(fi) || is.na(fi) || !grepl("@", fi, fixed = TRUE)) return(NA_character_)
-    # Split by @ and take the first part (gene)
+    # Check if feature identifier contains @
+    if (!is.character(fi) || is.na(fi) || !grepl("@", fi, fixed = TRUE)) return(NA)
+    # Split by @ and return first part which is the gene
     strsplit(fi, "@", fixed = TRUE)[[1]][1]
   }, USE.NAMES = FALSE)
 }
 
 # Extracts full cluster string from feature identifier
 get_cluster_string_from_feature <- function(feature_identifier) {
+  # Apply this function to each feature identifier in input list
   sapply(feature_identifier, function(fi) {
-    # Check for @
-    if (!is.character(fi) || is.na(fi) || !grepl("@", fi, fixed = TRUE)) return(NA_character_)
+    # Check if feature identifier contains @
+    if (!is.character(fi) || is.na(fi) || !grepl("@", fi, fixed = TRUE)) return(NA)
+    # Split by @ and return second part which is the cluster string
     parts <- strsplit(fi, "@", fixed = TRUE)[[1]]
-    # Return the second part the cluster string
-    if (length(parts) == 2) parts[2] else NA_character_
+    if (length(parts) == 2) parts[2] else NA
   }, USE.NAMES = FALSE)
 }
 
 # Gets simplified (sub)lineage name from a feature identifier
 get_simplified_sublineage <- function(identifier, default_value = "None") {
-  
   # Helper function to process a single identifier string
   process_single_id <- function(id) {
-    # Basic input validation
+    # Check if feature identifier is a character
     if (!is.character(id) || is.na(id)) return(default_value)
     
+    # Init cluster variable to parameter
     cluster_string_part <- id
-    # If it contains @ then split
+    
+    # Check if identifier contains @
     if (grepl("@", id, fixed = TRUE)) { 
+      # Get cluster parts by splitting on @
       parts <- strsplit(id, "@", fixed = TRUE)[[1]]
-      # Retrieve the second part
+      
+      # If the split was succesful it has two parts then focus on the second part
       if (length(parts) == 2 && nchar(parts[2]) > 0) {
+        # Second part is the cluster string
         cluster_string_part <- parts[2]
-      } else { 
-        # Nothing trails @ so something is wrong
+      } else {
+        # Default is none or the passed argument
         return(default_value)
       }
     }
     
-    # If the cluster string is empty
+    # If cluster string is empty return default value
     if (nchar(cluster_string_part) == 0) {
         return(default_value)
     }
 
-    # Regex to remove cluster ID
+    # Regex to remove cluster ID after the cluster name
     simplified <- gsub("_[0-9]+(_[a-zA-Z]+)?$", "", cluster_string_part)
     
-    # If (sub)lineage name is empty
+    # If simplified is empty return default value
     if (nchar(simplified) == 0) {
         return(default_value) 
     }
@@ -123,36 +137,42 @@ get_simplified_sublineage <- function(identifier, default_value = "None") {
     return(simplified)
   }
   
-  # Apply to each element in input
+  # Same as earlier function apply to all identifiers
   sapply(identifier, process_single_id, USE.NAMES = FALSE)
 }
 
-# Extracts the numeric cluster ID from a feature identifier
-# Assumes feature_identifier is like "gene@clustername_clusterid"
-# or "gene@clustername_with_underscores_clusterid"
+# Get cluster ID from feature identifier
 get_cluster_id_from_feature <- function(feature_identifier) {
+  # Apply this function to each feature identifier in input list
   sapply(feature_identifier, function(fi) {
-    if (!is.character(fi) || is.na(fi) || !grepl("@", fi, fixed = TRUE)) return(NA_character_)
+    # Check if feature identifier contains @
+    if (!is.character(fi) || is.na(fi) || !grepl("@", fi, fixed = TRUE)) return(NA)
     
+    # Split by @
     parts <- strsplit(fi, "@", fixed = TRUE)[[1]]
-    if (length(parts) != 2) return(NA_character_) # Ensure there's a part after @
-    
-    cluster_string_part <- parts[2]
-    if (nchar(cluster_string_part) == 0) return(NA_character_)
 
-    # Regex to find a numeric ID at the end of the cluster string, preceded by an underscore.
-    # It captures the numeric part.
-    # Example: "clustername_123" -> "123"
-    # Example: "cluster_name_with_parts_123" -> "123"
-    match_data <- regexec(".*?_(\\d+)$", cluster_string_part) # Non-greedy match for the name part
+    # Check if split was successful
+    if (length(parts) != 2) return(NA)
     
+    # Get the second part which is the cluster string
+    cluster_string_part <- parts[2]
+
+    # If the cluster string part is empty return NA
+    if (nchar(cluster_string_part) == 0) return(NA)
+
+    # Regex to find a numeric ID at the end of the cluster string
+    match_data <- regexec(".*?_(\\d+)$", cluster_string_part)
+    
+    # If regex match is successful
     if (match_data[[1]][1] != -1) {
+      # Extract the numeric ID from the match
       extracted_parts <- regmatches(cluster_string_part, match_data)[[1]]
-      # The cluster ID is the first captured group (index 2 of extracted_parts,
-      # as extracted_parts[1] is the full match of the regex against cluster_string_part)
-      return(extracted_parts[2]) # This will be the numeric ID as a string
+
+      # Return the final part which is the cluster ID
+      return(extracted_parts[2])
     } else {
-      return(NA_character_) # No numeric ID found at the end of the cluster_string_part
+      # If regex match fails then return NA
+      return(NA)
     }
   }, USE.NAMES = FALSE)
 }
