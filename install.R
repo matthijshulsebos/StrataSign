@@ -61,7 +61,8 @@ required_bioc_packages <- c(
   "KEGGREST",
   "graphite",
   "KEGGgraph",
-  "org.Hs.eg.db"
+  "org.Hs.eg.db",
+  "clusterProfiler"
 )
 
 # Install packages
